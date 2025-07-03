@@ -1,18 +1,18 @@
 const express = require("express");
 const router = express.Router();
+const verifyToken = require("../middleware/authMiddleware");
 const {
   getTasks,
   createTask,
   updateTask,
   deleteTask,
 } = require("../controllers/taskController");
-const verifyToken = require("../middleware/authMiddleware");
 
-router.use(verifyToken);
+router.use(verifyToken); // protects all task routes
 
-router.get("/", getTasks);
-router.post("/", createTask);
-router.put("/:id", updateTask);
-router.delete("/:id", deleteTask);
+router.get("/", getTasks); // Fetch all
+router.post("/", createTask); // Create
+router.put("/:id", updateTask); // Update
+router.delete("/:id", deleteTask); // Delete
 
 module.exports = router;

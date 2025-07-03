@@ -1,7 +1,7 @@
 const Task = require("../models/Task");
 
 const getTasks = async (req, res) => {
-  const tasks = await Task.find().populate("assignedTo", "name email");
+  const tasks = await Task.find(); // optionally filter by user
   res.json(tasks);
 };
 
@@ -11,16 +11,17 @@ const createTask = async (req, res) => {
     title,
     description,
     priority,
+    status: "Todo",
     assignedTo: req.user.id,
   });
   res.status(201).json(task);
 };
 
 const updateTask = async (req, res) => {
-  const task = await Task.findByIdAndUpdate(req.params.id, req.body, {
+  const updated = await Task.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
   });
-  res.json(task);
+  res.json(updated);
 };
 
 const deleteTask = async (req, res) => {
