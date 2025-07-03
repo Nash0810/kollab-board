@@ -6,21 +6,36 @@ const getTasks = async (req, res) => {
 };
 
 const createTask = async (req, res) => {
-  const { title, description, priority } = req.body;
-  const task = await Task.create({
+  const { title, description, priority, status, assignedTo } = req.body;
+
+  const task = new Task({
     title,
     description,
     priority,
-    status: "Todo",
-    assignedTo: req.user.id,
+    status: status || "Todo",
+    assignedTo: assignedTo || req.user.id, // fallback to current user
+    createdBy: req.user.id,
   });
-  res.status(201).json(task);
+
+  const saved = await task.save();
+  res.status(201).json(saved);
 };
 
 const updateTask = async (req, res) => {
-  const updated = await Task.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-  });
+  const { title, description, priority, status, assignedTo } = req.body;
+
+  const updated = await Task.findByIdAndUpdate(
+    req.params.id,
+    {
+      title,
+      description,
+      priority,
+      status,
+      assignedTo,
+    },
+    { new: true }
+  );
+
   res.json(updated);
 };
 

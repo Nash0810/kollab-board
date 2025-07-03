@@ -4,17 +4,18 @@ import { DragDropContext, Droppable, Draggable } from "react-beautiful-dnd";
 import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 
-// ✅ Socket defined once at module scope (prevents multiple connections)
 const socket = io("http://localhost:5000", {
   autoConnect: false,
 });
 
 function BoardPage() {
   const [tasks, setTasks] = useState([]);
+  const [users, setUsers] = useState([]);
   const [newTask, setNewTask] = useState({
     title: "",
     description: "",
     priority: "Medium",
+    assignedTo: "",
   });
   const [editingTask, setEditingTask] = useState(null);
   const [activity, setActivity] = useState([]);
@@ -22,13 +23,13 @@ function BoardPage() {
   const navigate = useNavigate();
   const statuses = ["Todo", "In Progress", "Done"];
 
-  // 🔐 Auth + socket connection
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/");
     } else {
       fetchTasks();
+      fetchUsers();
       socket.connect();
     }
 
@@ -53,6 +54,14 @@ function BoardPage() {
     setTasks(res.data);
   };
 
+  const fetchUsers = async () => {
+    const token = localStorage.getItem("token");
+    const res = await axios.get("http://localhost:5000/api/users", {
+      headers: { Authorization: token },
+    });
+    setUsers(res.data);
+  };
+
   const createTask = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem("token");
@@ -68,7 +77,12 @@ function BoardPage() {
       },
       ...prev,
     ]);
-    setNewTask({ title: "", description: "", priority: "Medium" });
+    setNewTask({
+      title: "",
+      description: "",
+      priority: "Medium",
+      assignedTo: "",
+    });
     fetchTasks();
   };
 
@@ -108,12 +122,18 @@ function BoardPage() {
       title: task.title,
       description: task.description,
       priority: task.priority,
+      assignedTo: task.assignedTo || "",
     });
   };
 
   const cancelEdit = () => {
     setEditingTask(null);
-    setNewTask({ title: "", description: "", priority: "Medium" });
+    setNewTask({
+      title: "",
+      description: "",
+      priority: "Medium",
+      assignedTo: "",
+    });
   };
 
   const saveEdit = async (e) => {
@@ -125,7 +145,6 @@ function BoardPage() {
       { headers: { Authorization: token } }
     );
     socket.emit("task-updated");
-
     setActivity((prev) => [
       {
         type: "Updated",
@@ -145,7 +164,6 @@ function BoardPage() {
       headers: { Authorization: token },
     });
     socket.emit("task-updated");
-
     setActivity((prev) => [
       {
         type: "Deleted",
@@ -157,6 +175,11 @@ function BoardPage() {
     fetchTasks();
   };
 
+  const [filterByMe, setFilterByMe] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const currentUser = JSON.parse(localStorage.getItem("user")); // for filtering
+
   return (
     <div style={{ padding: "20px" }}>
       <button
@@ -166,14 +189,19 @@ function BoardPage() {
         }}
         style={{ float: "right" }}
       >
-        🚪 Logout
+        Logout
       </button>
 
       <h2>Kollab Board</h2>
 
       <form
         onSubmit={editingTask ? saveEdit : createTask}
-        style={{ marginBottom: "20px", display: "flex", gap: "10px" }}
+        style={{
+          marginBottom: "20px",
+          display: "flex",
+          gap: "10px",
+          flexWrap: "wrap",
+        }}
       >
         <input
           placeholder="Title"
@@ -196,9 +224,21 @@ function BoardPage() {
           <option>Medium</option>
           <option>High</option>
         </select>
-
+        <select
+          value={newTask.assignedTo}
+          onChange={(e) =>
+            setNewTask({ ...newTask, assignedTo: e.target.value })
+          }
+          required
+        >
+          <option value="">-- Assign to --</option>
+          {users.map((user) => (
+            <option key={user._id} value={user._id}>
+              {user.name || user.email}
+            </option>
+          ))}
+        </select>
         <button type="submit">{editingTask ? "Save" : "Add Task"}</button>
-
         {editingTask && (
           <button type="button" onClick={cancelEdit}>
             Cancel
@@ -209,13 +249,7 @@ function BoardPage() {
       <DragDropContext onDragEnd={onDragEnd}>
         <div style={{ display: "flex", gap: "20px" }}>
           {statuses.map((status) => (
-            <Droppable
-              droppableId={status}
-              key={status}
-              isDropDisabled={false}
-              isCombineEnabled={false}
-              ignoreContainerClipping={false}
-            >
+            <Droppable droppableId={status} key={status}>
               {(provided) => (
                 <div
                   ref={provided.innerRef}
@@ -256,11 +290,19 @@ function BoardPage() {
                             <p>
                               <b>Priority:</b> {task.priority}
                             </p>
+                            <p>
+                              <b>Assigned to:</b>{" "}
+                              {users.find((u) => u._id === task.assignedTo)
+                                ?.name ||
+                                users.find((u) => u._id === task.assignedTo)
+                                  ?.email ||
+                                "Unknown"}
+                            </p>
                             <button onClick={() => startEdit(task)}>
-                              ✏️ Edit
+                              Edit
                             </button>
                             <button onClick={() => deleteTask(task._id)}>
-                              🗑️ Delete
+                              Delete
                             </button>
                           </div>
                         )}
@@ -275,7 +317,7 @@ function BoardPage() {
       </DragDropContext>
 
       <div style={{ marginTop: "30px" }}>
-        <h3>🕒 Activity Log</h3>
+        <h3>Activity Log</h3>
         <ul>
           {activity.map((log, i) => (
             <li key={i}>
