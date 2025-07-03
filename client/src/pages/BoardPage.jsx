@@ -2,6 +2,12 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { DragDropContext, Droppable, Draggable } from "react-beautiful-dnd";
 import { useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
+
+// ✅ Socket defined once at module scope (prevents multiple connections)
+const socket = io("http://localhost:5000", {
+  autoConnect: false,
+});
 
 function BoardPage() {
   const [tasks, setTasks] = useState([]);
@@ -16,13 +22,27 @@ function BoardPage() {
   const navigate = useNavigate();
   const statuses = ["Todo", "In Progress", "Done"];
 
+  // 🔐 Auth + socket connection
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/");
     } else {
       fetchTasks();
+      socket.connect();
     }
+
+    socket.on("connect", () => {
+      console.log("✅ Connected to socket:", socket.id);
+    });
+
+    socket.on("task-updated", () => {
+      fetchTasks();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   const fetchTasks = async () => {
@@ -39,6 +59,7 @@ function BoardPage() {
     await axios.post("http://localhost:5000/api/tasks", newTask, {
       headers: { Authorization: token },
     });
+    socket.emit("task-updated");
     setActivity((prev) => [
       {
         type: "Created",
@@ -67,6 +88,7 @@ function BoardPage() {
       { status: destination.droppableId },
       { headers: { Authorization: token } }
     );
+    socket.emit("task-updated");
 
     setActivity((prev) => [
       {
@@ -102,6 +124,8 @@ function BoardPage() {
       newTask,
       { headers: { Authorization: token } }
     );
+    socket.emit("task-updated");
+
     setActivity((prev) => [
       {
         type: "Updated",
@@ -120,6 +144,8 @@ function BoardPage() {
     await axios.delete(`http://localhost:5000/api/tasks/${id}`, {
       headers: { Authorization: token },
     });
+    socket.emit("task-updated");
+
     setActivity((prev) => [
       {
         type: "Deleted",
