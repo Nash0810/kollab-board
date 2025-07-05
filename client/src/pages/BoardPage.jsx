@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { io } from "socket.io-client";
 
 const API_BASE = "http://localhost:5000";
@@ -11,11 +11,18 @@ function BoardPage() {
   const [activities, setActivities] = useState([]);
   const [socket, setSocket] = useState(null);
   const [filterByMe, setFilterByMe] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [showAssignDropdown, setShowAssignDropdown] = useState(false);
   const assignDropdownRef = useRef(null);
+
+  const [conflictTask, setConflictTask] = useState(null);
+  const [localChanges, setLocalChanges] = useState(null);
+  const [conflictEditor, setConflictEditor] = useState(null);
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState(null);
 
   const [newTask, setNewTask] = useState({
     title: "",
@@ -115,10 +122,24 @@ function BoardPage() {
       setActivities((prev) => [activity, ...prev.slice(0, 19)]);
     });
 
+    socketInstance.on("edit-conflict", ({ taskId, currentEditor }) => {
+      if (editingTask && editingTask._id === taskId) {
+        setConflictTask(tasks.find((t) => t._id === taskId));
+        setLocalChanges(newTask);
+        setConflictEditor(currentEditor);
+        setEditingTask(null);
+        resetForm();
+        setError("Conflict detected! Another user is editing this task.");
+      }
+    });
+
     return () => {
+      if (editingTask && socketInstance) {
+        socketInstance.emit("stop-editing", editingTask._id);
+      }
       socketInstance.disconnect();
     };
-  }, [navigate, currentUser.id]);
+  }, [navigate, currentUser.id, editingTask, newTask, tasks]);
 
   useEffect(() => {
     const loadAll = async () => {
@@ -172,18 +193,35 @@ function BoardPage() {
     }
   };
 
-  const deleteTask = async (id) => {
-    if (!window.confirm("Delete task?")) return;
+  const handleDeleteClick = (task) => {
+    setTaskToDelete(task);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!taskToDelete) return;
+
     try {
-      await axios.delete(`${API_BASE}/api/tasks/${id}`, {
+      await axios.delete(`${API_BASE}/api/tasks/${taskToDelete._id}`, {
         headers: getAuthHeaders(),
       });
-      setTasks((prevTasks) => prevTasks.filter((task) => task._id !== id));
-      socket?.emit("task-updated", { type: "delete", id });
+      setTasks((prevTasks) =>
+        prevTasks.filter((task) => task._id !== taskToDelete._id)
+      );
+      socket?.emit("task-updated", { type: "delete", id: taskToDelete._id });
+      setTaskToDelete(null);
+      setShowDeleteModal(false);
     } catch (err) {
       console.error("Delete error:", err);
       setError("Failed to delete task.");
+      setTaskToDelete(null);
+      setShowDeleteModal(false);
     }
+  };
+
+  const cancelDelete = () => {
+    setTaskToDelete(null);
+    setShowDeleteModal(false);
   };
 
   const saveEdit = async (e) => {
@@ -192,6 +230,8 @@ function BoardPage() {
 
     const originalTask = tasks.find((t) => t._id === editingTask._id);
     if (!originalTask) return;
+
+    socket?.emit("stop-editing", editingTask._id);
 
     setTasks((prevTasks) =>
       prevTasks.map((task) =>
@@ -215,6 +255,10 @@ function BoardPage() {
   };
 
   const startEdit = (task) => {
+    if (socket) {
+      socket.emit("start-editing", task._id);
+    }
+
     setEditingTask(task);
     setNewTask({
       title: task.title,
@@ -231,6 +275,7 @@ function BoardPage() {
             : [task.assignedTo]
           ).filter(Boolean),
     });
+    setError("");
   };
 
   const resetForm = () => {
@@ -242,6 +287,7 @@ function BoardPage() {
       assignedTo: [],
     });
     setShowAssignDropdown(false);
+    setError("");
   };
 
   const handleDragStart = (e, taskId) => {
@@ -392,11 +438,73 @@ function BoardPage() {
     }
   };
 
+  const handleResolveConflict = async (resolutionType) => {
+    if (!conflictTask || !localChanges) return;
+
+    let mergedData = {};
+    if (resolutionType === "merge") {
+      mergedData = {
+        title: localChanges.title,
+        description: localChanges.description,
+        priority: localChanges.priority,
+        status: localChanges.status || conflictTask.status,
+        assignedTo:
+          localChanges.assignedTo || conflictTask.assignedTo.map((u) => u._id),
+      };
+    } else if (resolutionType === "overwrite") {
+      mergedData = {
+        title: localChanges.title,
+        description: localChanges.description,
+        priority: localChanges.priority,
+        status: localChanges.status,
+        assignedTo: localChanges.assignedTo,
+      };
+    } else if (resolutionType === "discard") {
+      mergedData = {
+        title: conflictTask.title,
+        description: conflictTask.description,
+        priority: conflictTask.priority,
+        status: conflictTask.status,
+        assignedTo: conflictTask.assignedTo.map((u) => u._id),
+      };
+    }
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/tasks/resolve-conflict`,
+        {
+          taskId: conflictTask._id,
+          resolution: resolutionType,
+          mergedData,
+        },
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+      console.log("Conflict resolved:", res.data);
+      setTasks((prevTasks) =>
+        prevTasks.map((task) => (task._id === res.data._id ? res.data : task))
+      );
+      setConflictTask(null);
+      setLocalChanges(null);
+      setConflictEditor(null);
+      setError("");
+    } catch (err) {
+      console.error("Failed to resolve conflict:", err);
+      setError("Failed to resolve conflict. Please try again.");
+    }
+  };
+
+  const getEditorName = (editorId) => {
+    const editor = users.find((u) => u._id === editorId);
+    return editor ? editor.name || editor.email : "Another User";
+  };
+
   if (loading) {
     return <div className="p-5 text-lg text-gray-700">Loading board...</div>;
   }
 
-  if (error) {
+  if (error && !conflictTask) {
     return <div className="p-5 text-lg text-red-600">Error: {error}</div>;
   }
 
@@ -439,16 +547,13 @@ function BoardPage() {
         </label>
       </div>
 
-      {/* Changed flex-col md:flex-row to flex-row to always display columns in a row */}
       <div className="flex flex-row gap-6 mb-8 overflow-x-auto pb-4">
-        {" "}
-        {/* Added overflow-x-auto for smaller screens */}
         {statuses.map((status) => (
           <div
             key={status}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, status)}
-            className="flex-shrink-0 w-80 bg-gray-50 p-4 rounded-lg shadow-md min-h-[300px] border border-gray-200" // Added flex-shrink-0 and fixed width
+            className="flex-shrink-0 w-80 bg-gray-50 p-4 rounded-lg shadow-md min-h-[300px] border border-gray-200"
           >
             <h3 className="text-xl font-semibold text-gray-700 mb-4">
               {status}
@@ -471,11 +576,10 @@ function BoardPage() {
                     {task.description}
                   </p>
                   <p className="text-xs text-gray-500 mb-2">
-                    <b className="font-semibold">Priority:</b> {task.priority}
+                    <b>Priority:</b> {task.priority}
                   </p>
                   <p className="text-xs text-gray-500 mb-3">
-                    <b className="font-semibold">Assigned to:</b>{" "}
-                    {getUserNames(task.assignedTo)}
+                    <b>Assigned to:</b> {getUserNames(task.assignedTo)}
                   </p>
                   <div className="flex space-x-2">
                     <button
@@ -485,7 +589,7 @@ function BoardPage() {
                       Edit
                     </button>
                     <button
-                      onClick={() => deleteTask(task._id)}
+                      onClick={() => handleDeleteClick(task)}
                       className="px-3 py-1 bg-red-500 text-white text-sm rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75 transition-colors duration-200"
                     >
                       Delete
@@ -532,7 +636,6 @@ function BoardPage() {
             <option>High</option>
           </select>
 
-          {/* Assign To Dropdown with Checkboxes */}
           <div className="relative" ref={assignDropdownRef}>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Assign To:
@@ -654,6 +757,115 @@ function BoardPage() {
           )}
         </ul>
       </div>
+
+      {conflictTask && localChanges && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl">
+            <h3 className="text-2xl font-bold text-red-600 mb-4">
+              Conflict Detected!
+            </h3>
+            <p className="text-gray-700 mb-4">
+              Another user ({getEditorName(conflictEditor)}) is currently
+              editing task "<b>{conflictTask.title}</b>". Please choose how to
+              resolve your unsaved changes.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
+                <h4 className="font-semibold text-lg text-gray-800 mb-2">
+                  Current Server Version
+                </h4>
+                <p className="text-sm text-gray-700">
+                  <b>Title:</b> {conflictTask.title}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Description:</b> {conflictTask.description}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Priority:</b> {conflictTask.priority}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Status:</b> {conflictTask.status}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Assigned To:</b> {getUserNames(conflictTask.assignedTo)}
+                </p>
+              </div>
+
+              <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
+                <h4 className="font-semibold text-lg text-blue-800 mb-2">
+                  Your Local Changes
+                </h4>
+                <p className="text-sm text-gray-700">
+                  <b>Title:</b> {localChanges.title}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Description:</b> {localChanges.description}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Priority:</b> {localChanges.priority}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Status:</b> {localChanges.status || conflictTask.status}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Assigned To:</b> {getUserNames(localChanges.assignedTo)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-3">
+              <button
+                onClick={() => handleResolveConflict("merge")}
+                className="px-5 py-2 bg-purple-600 text-white rounded-md shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75 transition-colors duration-200"
+              >
+                Merge (Keep your changes, but respect server's status/assignee)
+              </button>
+              <button
+                onClick={() => handleResolveConflict("overwrite")}
+                className="px-5 py-2 bg-yellow-600 text-white rounded-md shadow-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-75 transition-colors duration-200"
+              >
+                Overwrite (Your changes win)
+              </button>
+              <button
+                onClick={() => handleResolveConflict("discard")}
+                className="px-5 py-2 bg-gray-500 text-white rounded-md shadow-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75 transition-colors duration-200"
+              >
+                Discard (Use server's version)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && taskToDelete && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">
+              Confirm Deletion
+            </h3>
+            <p className="text-gray-700 mb-6">
+              Are you sure you want to delete the task "
+              <b>{taskToDelete.title}</b>"? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={cancelDelete}
+                className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md shadow-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-colors duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteTask}
+                className="px-4 py-2 bg-red-600 text-white rounded-md shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75 transition-colors duration-200"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
