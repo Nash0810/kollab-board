@@ -4,7 +4,11 @@ const getActivities = async (req, res) => {
   try {
     const { limit = 20, taskId } = req.query;
 
-    const query = taskId ? { taskId } : {};
+    let query = {};
+    if (taskId) {
+      query.taskId = taskId;
+    }
+
     const activities = await Activity.find(query)
       .populate("userId", "name email")
       .populate("taskId", "title")
@@ -18,7 +22,8 @@ const getActivities = async (req, res) => {
   }
 };
 
-const createActivity = async (req, res) => {
+// Modified to accept 'io' instance
+const createActivity = async (req, res, io) => {
   try {
     const { type, taskId, details } = req.body;
 
@@ -34,6 +39,11 @@ const createActivity = async (req, res) => {
     const populatedActivity = await Activity.findById(savedActivity._id)
       .populate("userId", "name email")
       .populate("taskId", "title");
+
+    // Emit the new activity to all connected clients
+    if (io) {
+      io.emit("activity-added", populatedActivity);
+    }
 
     res.status(201).json(populatedActivity);
   } catch (error) {

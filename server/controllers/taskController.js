@@ -3,8 +3,7 @@ const User = require("../models/User");
 const Activity = require("../models/Activity");
 const { validationResult } = require("express-validator");
 
-// Helper function to log activity
-const logActivity = async (type, taskId, userId, details = {}) => {
+const logActivity = async (type, taskId, userId, details = {}, io) => {
   try {
     const activity = new Activity({
       type,
@@ -13,8 +12,17 @@ const logActivity = async (type, taskId, userId, details = {}) => {
       details,
       timestamp: new Date(),
     });
-    await activity.save();
-    return activity;
+
+    const savedActivity = await activity.save();
+    const populatedActivity = await Activity.findById(savedActivity._id)
+      .populate("userId", "name email")
+      .populate("taskId", "title");
+
+    if (io) {
+      io.emit("activity-added", populatedActivity);
+    }
+
+    return populatedActivity;
   } catch (error) {
     console.error("Error logging activity:", error);
   }
@@ -25,7 +33,6 @@ const getTasks = async (req, res) => {
     const { status, assignedTo, priority, search } = req.query;
     let query = {};
 
-    // Apply filters
     if (status) query.status = status;
     if (assignedTo) query.assignedTo = assignedTo;
     if (priority) query.priority = priority;
@@ -48,7 +55,7 @@ const getTasks = async (req, res) => {
   }
 };
 
-const createTask = async (req, res) => {
+const createTask = async (req, res, io) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -57,13 +64,11 @@ const createTask = async (req, res) => {
 
     const { title, description, priority, assignedTo } = req.body;
 
-    // Check for unique title
     const existingTask = await Task.findOne({ title });
     if (existingTask) {
       return res.status(400).json({ message: "Task title must be unique" });
     }
 
-    // Check if title matches column names
     const columnNames = ["Todo", "In Progress", "Done"];
     if (columnNames.includes(title)) {
       return res.status(400).json({
@@ -85,11 +90,16 @@ const createTask = async (req, res) => {
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email");
 
-    // Log activity
-    await logActivity("create", savedTask._id, req.user.id, {
-      title: savedTask.title,
-      assignedTo: assignedTo,
-    });
+    await logActivity(
+      "Task Created",
+      savedTask._id,
+      req.user.id,
+      {
+        title: savedTask.title,
+        userName: req.user.name || req.user.email,
+      },
+      io
+    );
 
     res.status(201).json(populatedTask);
   } catch (error) {
@@ -98,75 +108,119 @@ const createTask = async (req, res) => {
   }
 };
 
-const updateTask = async (req, res) => {
+const updateTask = async (req, res, io) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, description, priority, status, assignedTo } = req.body;
     const taskId = req.params.id;
+    const updates = req.body;
 
-    // Check if task exists
     const existingTask = await Task.findById(taskId);
     if (!existingTask) {
       return res.status(404).json({ message: "Task not found" });
     }
 
-    // Check for unique title (excluding current task)
-    if (title && title !== existingTask.title) {
-      const titleExists = await Task.findOne({ title, _id: { $ne: taskId } });
+    if (updates.title && updates.title !== existingTask.title) {
+      const titleExists = await Task.findOne({
+        title: updates.title,
+        _id: { $ne: taskId },
+      });
       if (titleExists) {
         return res.status(400).json({ message: "Task title must be unique" });
       }
     }
 
-    // Check if title matches column names
     const columnNames = ["Todo", "In Progress", "Done"];
-    if (title && columnNames.includes(title)) {
+    if (updates.title && columnNames.includes(updates.title)) {
       return res.status(400).json({
         message: "Task title cannot match column names",
       });
     }
 
-    // Track changes for activity log
     const changes = {};
-    if (title !== existingTask.title)
-      changes.title = { from: existingTask.title, to: title };
-    if (status !== existingTask.status)
-      changes.status = { from: existingTask.status, to: status };
-    if (assignedTo !== existingTask.assignedTo?.toString())
-      changes.assignedTo = { from: existingTask.assignedTo, to: assignedTo };
+    if (updates.title && updates.title !== existingTask.title)
+      changes.title = { from: existingTask.title, to: updates.title };
+
+    if (updates.status && updates.status !== existingTask.status) {
+      changes.status = { from: existingTask.status, to: updates.status };
+    }
+
+    if (updates.assignedTo) {
+      const existingAssignedToIds = existingTask.assignedTo
+        .map((u) => u.toString())
+        .sort();
+      const newAssignedToIds = updates.assignedTo
+        .map((u) => u.toString())
+        .sort();
+
+      if (
+        JSON.stringify(existingAssignedToIds) !==
+        JSON.stringify(newAssignedToIds)
+      ) {
+        const fromNames = await Promise.all(
+          existingAssignedToIds.map(async (id) => {
+            const user = await User.findById(id);
+            return user ? user.name || user.email : "Unknown User";
+          })
+        );
+        const toNames = await Promise.all(
+          newAssignedToIds.map(async (id) => {
+            const user = await User.findById(id);
+            return user ? user.name || user.email : "Unknown User";
+          })
+        );
+        changes.assignedTo = { from: fromNames, to: toNames };
+      }
+    }
 
     const updatedTask = await Task.findByIdAndUpdate(
       taskId,
-      {
-        title,
-        description,
-        priority,
-        status,
-        assignedTo,
-        lastModified: Date.now(),
-      },
-      { new: true }
+      { ...updates, lastModified: Date.now() },
+      { new: true, runValidators: true }
     )
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email");
 
-    // Log activity if there are changes
+    if (!updatedTask) {
+      return res
+        .status(404)
+        .json({ message: "Task not found after update attempt" });
+    }
+
     if (Object.keys(changes).length > 0) {
-      await logActivity("update", taskId, req.user.id, changes);
+      let activityType = "Task Updated";
+      if (changes.status) {
+        activityType = "Task Status Changed";
+      } else if (changes.assignedTo) {
+        activityType = "Task Assigned";
+      } else if (changes.title) {
+        activityType = "Task Title Changed";
+      }
+      await logActivity(
+        activityType,
+        taskId,
+        req.user.id,
+        { ...changes, userName: req.user.name || req.user.email },
+        io
+      );
     }
 
     res.json(updatedTask);
   } catch (error) {
     console.error("Error updating task:", error);
+    if (error.name === "ValidationError") {
+      return res
+        .status(400)
+        .json({ message: error.message, errors: error.errors });
+    }
     res.status(500).json({ message: "Error updating task" });
   }
 };
 
-const deleteTask = async (req, res) => {
+const deleteTask = async (req, res, io) => {
   try {
     const taskId = req.params.id;
     const task = await Task.findById(taskId);
@@ -177,10 +231,16 @@ const deleteTask = async (req, res) => {
 
     await Task.findByIdAndDelete(taskId);
 
-    // Log activity
-    await logActivity("delete", taskId, req.user.id, {
-      title: task.title,
-    });
+    await logActivity(
+      "Task Deleted",
+      taskId,
+      req.user.id,
+      {
+        title: task.title,
+        userName: req.user.name || req.user.email,
+      },
+      io
+    );
 
     res.json({ message: "Task deleted successfully" });
   } catch (error) {
@@ -189,8 +249,7 @@ const deleteTask = async (req, res) => {
   }
 };
 
-// Smart Assign Implementation
-const smartAssign = async (req, res) => {
+const smartAssign = async (req, res, io) => {
   try {
     const taskId = req.params.id;
     const task = await Task.findById(taskId);
@@ -199,10 +258,8 @@ const smartAssign = async (req, res) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
-    // Get all users
     const users = await User.find({}, "_id name email");
 
-    // Count active tasks for each user (Todo + In Progress)
     const userTaskCounts = await Promise.all(
       users.map(async (user) => {
         const activeTaskCount = await Task.countDocuments({
@@ -218,30 +275,38 @@ const smartAssign = async (req, res) => {
       })
     );
 
-    // Find user with minimum active tasks
     const smartAssignUser = userTaskCounts.reduce((min, user) =>
       user.activeTaskCount < min.activeTaskCount ? user : min
     );
 
-    // Update task
     const updatedTask = await Task.findByIdAndUpdate(
       taskId,
-      { assignedTo: smartAssignUser.userId, lastModified: Date.now() },
+      { assignedTo: [smartAssignUser.userId], lastModified: Date.now() },
       { new: true }
     )
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email");
 
-    // Log activity
-    await logActivity("smart_assign", taskId, req.user.id, {
-      title: task.title,
-      assignedTo: smartAssignUser.userId,
-      reason: `Auto-assigned to user with least active tasks (${smartAssignUser.activeTaskCount})`,
-    });
+    await logActivity(
+      "Task Assigned (Smart)",
+      taskId,
+      req.user.id,
+      {
+        title: task.title,
+        assignedTo: smartAssignUser.userId,
+        reason: `Auto-assigned to user with least active tasks (${
+          smartAssignUser.name || smartAssignUser.email
+        } - ${smartAssignUser.activeTaskCount} active tasks)`,
+        userName: req.user.name || req.user.email,
+      },
+      io
+    );
 
     res.json({
       task: updatedTask,
-      smartAssignReason: `Assigned to ${smartAssignUser.name} who has the least active tasks (${smartAssignUser.activeTaskCount})`,
+      smartAssignReason: `Assigned to ${
+        smartAssignUser.name || smartAssignUser.email
+      } who has the least active tasks (${smartAssignUser.activeTaskCount})`,
     });
   } catch (error) {
     console.error("Error in smart assign:", error);
@@ -249,13 +314,11 @@ const smartAssign = async (req, res) => {
   }
 };
 
-// Handle conflict resolution
-const resolveConflict = async (req, res) => {
+const resolveConflict = async (req, res, io) => {
   try {
     const { taskId, resolution, mergedData } = req.body;
 
-    if (resolution === "merge") {
-      // Apply merged data
+    if (resolution === "merge" || resolution === "overwrite") {
       const updatedTask = await Task.findByIdAndUpdate(
         taskId,
         { ...mergedData, lastModified: Date.now() },
@@ -264,28 +327,17 @@ const resolveConflict = async (req, res) => {
         .populate("assignedTo", "name email")
         .populate("createdBy", "name email");
 
-      // Log activity
-      await logActivity("conflict_resolve", taskId, req.user.id, {
-        resolution: "merge",
-        title: updatedTask.title,
-      });
-
-      res.json(updatedTask);
-    } else if (resolution === "overwrite") {
-      // Overwrite with current user's data
-      const updatedTask = await Task.findByIdAndUpdate(
+      await logActivity(
+        "Conflict Resolved",
         taskId,
-        { ...mergedData, lastModified: Date.now() },
-        { new: true }
-      )
-        .populate("assignedTo", "name email")
-        .populate("createdBy", "name email");
-
-      // Log activity
-      await logActivity("conflict_resolve", taskId, req.user.id, {
-        resolution: "overwrite",
-        title: updatedTask.title,
-      });
+        req.user.id,
+        {
+          resolution: resolution,
+          title: updatedTask.title,
+          userName: req.user.name || req.user.email,
+        },
+        io
+      );
 
       res.json(updatedTask);
     } else {

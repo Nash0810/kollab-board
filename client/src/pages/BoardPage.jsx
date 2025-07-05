@@ -1,15 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
-// Removed react-beautiful-dnd as it caused compilation issues in this environment.
-// Implementing basic drag-and-drop using native HTML Drag and Drop API.
 import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 
-// Define the API base URL. Hardcoding as import.meta.env caused issues.
 const API_BASE = "http://localhost:5000";
 
 function BoardPage() {
-  // State variables for tasks, users, activities, and UI logic
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [activities, setActivities] = useState([]);
@@ -17,10 +13,10 @@ function BoardPage() {
   const [filterByMe, setFilterByMe] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // State to store the ID of the task currently being dragged
   const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [showAssignDropdown, setShowAssignDropdown] = useState(false);
+  const assignDropdownRef = useRef(null);
 
-  // State for new task form
   const [newTask, setNewTask] = useState({
     title: "",
     description: "",
@@ -28,25 +24,20 @@ function BoardPage() {
     assignedTo: [],
   });
 
-  // State for editing tasks
   const [editingTask, setEditingTask] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
 
   const navigate = useNavigate();
-  // Define the possible task statuses (columns)
   const statuses = ["Todo", "In Progress", "Done"];
-  // Get current user details from local storage
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
 
-  // Memoized function to get authentication headers
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem("token");
     return { Authorization: `Bearer ${token}` };
   }, []);
 
-  // Function to fetch tasks from the backend
   const fetchTasks = useCallback(async () => {
     try {
       const params = new URLSearchParams();
@@ -64,7 +55,6 @@ function BoardPage() {
     }
   }, [searchTerm, filterStatus, filterAssignee, getAuthHeaders]);
 
-  // Function to fetch users from the backend
   const fetchUsers = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/users`, {
@@ -76,7 +66,6 @@ function BoardPage() {
     }
   }, [getAuthHeaders]);
 
-  // Function to fetch activities from the backend
   const fetchActivities = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/activities`, {
@@ -88,38 +77,31 @@ function BoardPage() {
     }
   }, [getAuthHeaders]);
 
-  // useEffect for Socket.IO connection and event listeners
   useEffect(() => {
     const token = localStorage.getItem("token");
-    // Redirect to login if no token is found
     if (!token) {
       navigate("/");
       return;
     }
 
-    // Initialize Socket.IO client
     const socketInstance = io(API_BASE, {
-      auth: { token }, // Pass token for authentication
-      autoConnect: false, // Prevent auto-connection
+      auth: { token },
+      autoConnect: false,
     });
 
-    socketInstance.connect(); // Manually connect
+    socketInstance.connect();
     setSocket(socketInstance);
 
-    // Socket event: on connect, join user-specific room
     socketInstance.on("connect", () => {
       socketInstance.emit("join-user", currentUser.id);
     });
 
     socketInstance.on("task-updated", (updatedTaskFromServer) => {
-      // Update local state with the task from the server
       setTasks((prevTasks) => {
-        // Check if the task already exists in our state
         const existingTaskIndex = prevTasks.findIndex(
           (t) => t._id === updatedTaskFromServer._id
         );
         if (existingTaskIndex > -1) {
-          // If it exists, update it
           const newTasks = [...prevTasks];
           newTasks[existingTaskIndex] = updatedTaskFromServer;
           return newTasks;
@@ -127,83 +109,83 @@ function BoardPage() {
           return [...prevTasks, updatedTaskFromServer];
         }
       });
-      fetchActivities(); // Fetch activities to ensure log is up-to-date
     });
 
-    // Socket event: when an activity is added
     socketInstance.on("activity-added", (activity) => {
-      // Add new activity to the top of the list, keeping only the latest 20
       setActivities((prev) => [activity, ...prev.slice(0, 19)]);
     });
 
-    // Cleanup function for socket disconnection
     return () => {
       socketInstance.disconnect();
     };
-  }, [navigate, currentUser.id, fetchActivities]);
+  }, [navigate, currentUser.id]);
 
-  // useEffect to load all initial data (tasks, users, activities)
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
-      // Fetch all data concurrently
       await Promise.all([fetchTasks(), fetchUsers(), fetchActivities()]);
       setLoading(false);
     };
     loadAll();
-  }, [fetchTasks, fetchUsers, fetchActivities]); // Dependencies ensure this runs when fetch functions change
+  }, [fetchTasks, fetchUsers, fetchActivities]);
 
-  // Function to update a task on the backend
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        assignDropdownRef.current &&
+        !assignDropdownRef.current.contains(event.target)
+      ) {
+        setShowAssignDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   const updateTask = async (id, updates) => {
     try {
       const res = await axios.put(`${API_BASE}/api/tasks/${id}`, updates, {
         headers: getAuthHeaders(),
       });
-      // Emit socket event only after successful API call
       socket?.emit("task-updated", res.data);
-      return res.data; // Return updated data for optimistic update logic
+      return res.data;
     } catch (err) {
       console.error("Failed to update task:", err);
-      throw err; // Re-throw to allow error handling in onDragEnd or saveEdit
+      throw err;
     }
   };
 
-  // Function to create a new task
   const createTask = async (e) => {
-    e.preventDefault(); // Prevent default form submission
+    e.preventDefault();
     try {
       const res = await axios.post(`${API_BASE}/api/tasks`, newTask, {
         headers: getAuthHeaders(),
       });
-      // Update local state with the new task from the server
       setTasks((prevTasks) => [...prevTasks, res.data]);
-      socket?.emit("task-updated", res.data); // Emit socket event
-      resetForm(); // Clear the form
-      fetchActivities(); // Fetch activities to log the creation
+      socket?.emit("task-updated", res.data);
+      resetForm();
     } catch (err) {
       console.error("Failed to create task:", err);
-      setError("Failed to create task."); // Set error message for UI
+      setError("Failed to create task.");
     }
   };
 
-  // Function to delete a task
   const deleteTask = async (id) => {
     if (!window.confirm("Delete task?")) return;
     try {
       await axios.delete(`${API_BASE}/api/tasks/${id}`, {
         headers: getAuthHeaders(),
       });
-      // Optimistically remove from UI
       setTasks((prevTasks) => prevTasks.filter((task) => task._id !== id));
-      socket?.emit("task-updated", { type: "delete", id }); // Emit delete event
-      fetchActivities(); // Fetch activities to log the deletion
+      socket?.emit("task-updated", { type: "delete", id });
     } catch (err) {
       console.error("Delete error:", err);
-      setError("Failed to delete task."); // Set error message for UI
+      setError("Failed to delete task.");
     }
   };
 
-  // Function to save an edited task
   const saveEdit = async (e) => {
     e.preventDefault();
     if (!editingTask) return;
@@ -211,7 +193,6 @@ function BoardPage() {
     const originalTask = tasks.find((t) => t._id === editingTask._id);
     if (!originalTask) return;
 
-    // Optimistically update the UI
     setTasks((prevTasks) =>
       prevTasks.map((task) =>
         task._id === editingTask._id ? { ...task, ...newTask } : task
@@ -219,12 +200,9 @@ function BoardPage() {
     );
 
     try {
-      // Send updates to the backend
       await updateTask(editingTask._id, newTask);
-      // The socket emit is handled inside updateTask
     } catch (err) {
       console.error("Failed to save edit:", err);
-      // Revert if API call fails
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task._id === editingTask._id ? originalTask : task
@@ -232,27 +210,29 @@ function BoardPage() {
       );
       setError("Failed to save changes. Please try again.");
     } finally {
-      resetForm(); // Clear the form and editing state
+      resetForm();
     }
   };
 
-  // Function to start editing a task (populate form with task data)
   const startEdit = (task) => {
     setEditingTask(task);
     setNewTask({
       title: task.title,
       description: task.description,
       priority: task.priority,
-      // Ensure assignedTo is an array of IDs for the checkbox logic
       assignedTo: Array.isArray(task.assignedTo)
-        ? task.assignedTo.map((u) => u._id)
-        : task.assignedTo
-        ? [task.assignedTo._id]
-        : [], // Handle single object or null
+        ? task.assignedTo
+            .map((item) =>
+              typeof item === "object" && item !== null ? item._id : item
+            )
+            .filter(Boolean)
+        : (task.assignedTo && typeof task.assignedTo === "object"
+            ? [task.assignedTo._id]
+            : [task.assignedTo]
+          ).filter(Boolean),
     });
   };
 
-  // Function to reset the new task/edit form
   const resetForm = () => {
     setEditingTask(null);
     setNewTask({
@@ -261,17 +241,18 @@ function BoardPage() {
       priority: "Medium",
       assignedTo: [],
     });
+    setShowAssignDropdown(false);
   };
 
   const handleDragStart = (e, taskId) => {
-    setDraggedTaskId(taskId); // Store the ID of the task being dragged
-    e.dataTransfer.setData("text/plain", taskId); // Set data for drop target
-    e.dataTransfer.effectAllowed = "move"; // Visual feedback
+    setDraggedTaskId(taskId);
+    e.dataTransfer.setData("text/plain", taskId);
+    e.dataTransfer.effectAllowed = "move";
   };
 
   const handleDragOver = (e) => {
-    e.preventDefault(); // Allow drop
-    e.dataTransfer.dropEffect = "move"; // Visual feedback
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
   };
 
   const handleDrop = async (e, newStatus) => {
@@ -283,12 +264,10 @@ function BoardPage() {
       (taskId === draggedTaskId &&
         newStatus === tasks.find((t) => t._id === taskId)?.status)
     ) {
-      // Do nothing if no task ID or if dropped in the same column
-      setDraggedTaskId(null); // Clear dragged task ID
+      setDraggedTaskId(null);
       return;
     }
 
-    // Optimistically update the UI state
     setTasks((prevTasks) => {
       const newTasks = Array.from(prevTasks);
       const taskIndex = newTasks.findIndex((task) => task._id === taskId);
@@ -299,218 +278,380 @@ function BoardPage() {
       }
 
       const taskToMove = { ...newTasks[taskIndex] };
-      const originalStatus = taskToMove.status;
-
-      taskToMove.status = newStatus; // Update the task's status
+      taskToMove.status = newStatus;
       newTasks[taskIndex] = taskToMove;
 
       return newTasks;
     });
 
     try {
-      // Send the update to the backend
       await updateTask(taskId, { status: newStatus });
     } catch (err) {
       console.error("Failed to update task status on backend:", err);
-      // Revert the optimistic update if the API call fails
       setTasks((prevTasks) => {
+        const originalTask = tasks.find((t) => t._id === taskId);
         return prevTasks.map((task) =>
           task._id === taskId
-            ? { ...task, status: tasks.find((t) => t._id === taskId)?.status }
+            ? { ...task, status: originalTask?.status || "Todo" }
             : task
         );
       });
       setError("Failed to update task status. Please try again.");
     } finally {
-      setDraggedTaskId(null); // Clear dragged task ID after drop attempt
+      setDraggedTaskId(null);
     }
   };
 
-  // Helper function to get user names from IDs
-  const getUserNames = (ids) => {
-    // Ensure ids is an array, even if a single ID is passed
-    const arr = Array.isArray(ids) ? ids : [ids].filter(Boolean); // Filter out null/undefined
+  const handleSmartAssign = async () => {
+    if (!editingTask) {
+      setError("Please select or create a task to smart assign.");
+      return;
+    }
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/tasks/${editingTask._id}/smart-assign`,
+        {},
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+      setNewTask((prev) => ({
+        ...prev,
+        assignedTo: Array.isArray(res.data.task.assignedTo)
+          ? res.data.task.assignedTo.map((u) => u._id)
+          : [res.data.task.assignedTo._id],
+      }));
+      console.log("Smart assign successful:", res.data.smartAssignReason);
+    } catch (err) {
+      console.error("Failed to smart assign task:", err);
+      setError("Failed to smart assign task. Please try again.");
+    }
+  };
+
+  const getUserNames = (assignedUsersOrIds) => {
+    const assignedIds = Array.isArray(assignedUsersOrIds)
+      ? assignedUsersOrIds
+          .map((item) =>
+            typeof item === "object" && item !== null ? item._id : item
+          )
+          .filter(Boolean)
+      : (assignedUsersOrIds && typeof assignedUsersOrIds === "object"
+          ? [assignedUsersOrIds._id]
+          : [assignedUsersOrIds]
+        ).filter(Boolean);
 
     return users
-      .filter((u) => arr.includes(u._id))
-      .map((u) => u.name || u.email)
+      .filter((userInState) => assignedIds.includes(userInState._id))
+      .map((userInState) => userInState.name || userInState.email)
       .join(", ");
   };
 
-  // Filter tasks based on search term and "assigned to me" checkbox
   const filteredTasks = tasks.filter((task) => {
     const matchesSearch =
       task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       task.description?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesByMe =
-      !filterByMe || task.assignedTo?.some?.((u) => u._id === currentUser.id);
+      !filterByMe ||
+      task.assignedTo?.some?.((u) => {
+        const assignedUserId = typeof u === "object" && u !== null ? u._id : u;
+        return assignedUserId === currentUser.id;
+      });
     return matchesSearch && matchesByMe;
   });
 
-  // Display loading message if data is still being fetched
+  const formatActivityLog = (log) => {
+    const userName = log.userId?.name || log.userId?.email || "Unknown User";
+    const taskTitle = log.taskId?.title || log.details?.title || "Task";
+
+    switch (log.type) {
+      case "Task Created":
+        return `${userName} created task "${taskTitle}"`;
+      case "Task Deleted":
+        return `${userName} deleted task "${taskTitle}"`;
+      case "Task Status Changed":
+        const fromStatus = log.details?.status?.from || "Unknown";
+        const toStatus = log.details?.status?.to || "Unknown";
+        return `${userName} changed status of "${taskTitle}" from "${fromStatus}" to "${toStatus}"`;
+      case "Task Assigned":
+        const fromAssignees =
+          log.details?.assignedTo?.from?.join(", ") || "Nobody";
+        const toAssignees = log.details?.assignedTo?.to?.join(", ") || "Nobody";
+        return `${userName} changed assigned users for "${taskTitle}" from [${fromAssignees}] to [${toAssignees}]`;
+      case "Task Assigned (Smart)":
+        return `${userName} smart-assigned "${taskTitle}". Reason: ${
+          log.details?.reason || "N/A"
+        }`;
+      case "Task Title Changed":
+        const oldTitle = log.details?.title?.from || "Unknown Title";
+        const newTitle = log.details?.title?.to || "Unknown Title";
+        return `${userName} changed title of "${oldTitle}" to "${newTitle}"`;
+      case "Conflict Resolved":
+        return `${userName} resolved a conflict for "${taskTitle}" (${log.details?.resolution} method)`;
+      default:
+        return `${userName} ${log.type} "${taskTitle}"`;
+    }
+  };
+
   if (loading) {
-    return <div style={{ padding: "20px" }}>Loading board...</div>;
+    return <div className="p-5 text-lg text-gray-700">Loading board...</div>;
   }
 
-  // Display error message if fetching failed
   if (error) {
-    return <div style={{ padding: "20px", color: "red" }}>Error: {error}</div>;
+    return <div className="p-5 text-lg text-red-600">Error: {error}</div>;
   }
 
   return (
-    <div style={{ padding: "20px" }}>
-      <button
-        onClick={() => {
-          localStorage.clear(); // Clear user data from local storage
-          navigate("/"); // Navigate back to login page
-        }}
-        style={{ float: "right" }}
-      >
-        Logout
-      </button>
-      <h2>
-        Kollab Board — Welcome, <b>{currentUser?.name || currentUser?.email}</b>
-      </h2>
+    <div className="min-h-screen bg-gray-100 p-5 font-sans">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-bold text-gray-800">
+          Kollab Board — Welcome,{" "}
+          <b className="text-blue-600">
+            {currentUser?.name || currentUser?.email}
+          </b>
+        </h2>
+        <button
+          onClick={() => {
+            localStorage.clear();
+            navigate("/");
+          }}
+          className="px-4 py-2 bg-red-500 text-white rounded-md shadow-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75 transition-colors duration-200"
+        >
+          Logout
+        </button>
+      </div>
 
-      <div style={{ margin: "10px 0", display: "flex", gap: "10px" }}>
+      <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <input
           type="text"
           placeholder="Search tasks..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
+          className="p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 w-full sm:w-auto"
         />
-        <label>
+        <label className="flex items-center space-x-2 text-gray-700">
           <input
             type="checkbox"
             checked={filterByMe}
             onChange={(e) => setFilterByMe(e.target.checked)}
+            className="form-checkbox h-5 w-5 text-blue-600 rounded"
           />
-          Assigned to me
+          <span>Assigned to me</span>
         </label>
       </div>
 
-      {/* Replaced DragDropContext with a simple div as rbdnd is removed */}
-      <div style={{ display: "flex", gap: "20px" }}>
+      {/* Changed flex-col md:flex-row to flex-row to always display columns in a row */}
+      <div className="flex flex-row gap-6 mb-8 overflow-x-auto pb-4">
+        {" "}
+        {/* Added overflow-x-auto for smaller screens */}
         {statuses.map((status) => (
           <div
             key={status}
-            onDragOver={handleDragOver} // Allow dropping
-            onDrop={(e) => handleDrop(e, status)} // Handle drop for this column
-            style={{
-              flex: 1,
-              backgroundColor: "#f0f0f0",
-              padding: "10px",
-              borderRadius: "8px",
-              minHeight: "300px",
-            }}
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, status)}
+            className="flex-shrink-0 w-80 bg-gray-50 p-4 rounded-lg shadow-md min-h-[300px] border border-gray-200" // Added flex-shrink-0 and fixed width
           >
-            <h3>{status}</h3>
-            {/* Filter tasks by their current status for rendering in the correct column */}
+            <h3 className="text-xl font-semibold text-gray-700 mb-4">
+              {status}
+            </h3>
             {filteredTasks
               .filter((t) => t.status === status)
               .map((task) => (
                 <div
                   key={task._id}
-                  draggable="true" // Make the task draggable
-                  onDragStart={(e) => handleDragStart(e, task._id)} // Handle drag start
-                  style={{
-                    padding: "10px",
-                    marginBottom: "10px",
-                    backgroundColor: "white",
-                    border: "1px solid #ccc",
-                    borderRadius: "4px",
-                    cursor: "grab", // Indicate draggable
-                    opacity: draggedTaskId === task._id ? 0.5 : 1, // Visual feedback for dragging
-                  }}
+                  draggable="true"
+                  onDragStart={(e) => handleDragStart(e, task._id)}
+                  className={`bg-white p-4 mb-3 rounded-lg shadow-sm border border-gray-200 cursor-grab transition-opacity duration-200 ${
+                    draggedTaskId === task._id ? "opacity-50" : "opacity-100"
+                  }`}
                 >
-                  <h4>{task.title}</h4>
-                  <p>{task.description}</p>
-                  <p>
-                    <b>Priority:</b> {task.priority}
+                  <h4 className="text-lg font-medium text-gray-800 mb-1">
+                    {task.title}
+                  </h4>
+                  <p className="text-sm text-gray-600 mb-2">
+                    {task.description}
                   </p>
-                  <p>
-                    <b>Assigned to:</b> {getUserNames(task.assignedTo)}
+                  <p className="text-xs text-gray-500 mb-2">
+                    <b className="font-semibold">Priority:</b> {task.priority}
                   </p>
-                  <button onClick={() => startEdit(task)}>Edit</button>
-                  <button onClick={() => deleteTask(task._id)}>Delete</button>
+                  <p className="text-xs text-gray-500 mb-3">
+                    <b className="font-semibold">Assigned to:</b>{" "}
+                    {getUserNames(task.assignedTo)}
+                  </p>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => startEdit(task)}
+                      className="px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition-colors duration-200"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteTask(task._id)}
+                      className="px-3 py-1 bg-red-500 text-white text-sm rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75 transition-colors duration-200"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
           </div>
         ))}
       </div>
 
-      {/* Form for creating/editing tasks */}
       <form
         onSubmit={editingTask ? saveEdit : createTask}
-        style={{ marginTop: "20px" }}
+        className="bg-white p-6 rounded-lg shadow-md mb-8"
       >
-        <input
-          placeholder="Title"
-          value={newTask.title}
-          onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-          required
-        />
-        <input
-          placeholder="Description"
-          value={newTask.description}
-          onChange={(e) =>
-            setNewTask({ ...newTask, description: e.target.value })
-          }
-        />
-        <select
-          value={newTask.priority}
-          onChange={(e) => setNewTask({ ...newTask, priority: e.target.value })}
-        >
-          <option>Low</option>
-          <option>Medium</option>
-          <option>High</option>
-        </select>
+        <h3 className="text-xl font-semibold text-gray-700 mb-4">
+          {editingTask ? "Edit Task" : "Add New Task"}
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <input
+            placeholder="Title"
+            value={newTask.title}
+            onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+            className="p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            required
+          />
+          <input
+            placeholder="Description"
+            value={newTask.description}
+            onChange={(e) =>
+              setNewTask({ ...newTask, description: e.target.value })
+            }
+            className="p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+          />
+          <select
+            value={newTask.priority}
+            onChange={(e) =>
+              setNewTask({ ...newTask, priority: e.target.value })
+            }
+            className="p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option>Low</option>
+            <option>Medium</option>
+            <option>High</option>
+          </select>
 
-        <div>
-          <label>
-            <b>Assign To:</b>
-          </label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            {users.map((user) => (
-              <label key={user._id}>
-                <input
-                  type="checkbox"
-                  value={user._id}
-                  checked={newTask.assignedTo.includes(user._id)}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    const updated = newTask.assignedTo.includes(id)
-                      ? newTask.assignedTo.filter((uid) => uid !== id)
-                      : [...newTask.assignedTo, id];
-                    setNewTask({ ...newTask, assignedTo: updated });
-                  }}
-                />
-                {user.name || user.email}
-              </label>
-            ))}
+          {/* Assign To Dropdown with Checkboxes */}
+          <div className="relative" ref={assignDropdownRef}>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Assign To:
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowAssignDropdown(!showAssignDropdown)}
+              className="w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-left text-gray-700 hover:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all duration-200 flex justify-between items-center"
+            >
+              <span>
+                {newTask.assignedTo.length > 0
+                  ? `${newTask.assignedTo.length} user(s) selected`
+                  : "Select Users"}
+              </span>
+              <svg
+                className={`w-4 h-4 transition-transform duration-200 ${
+                  showAssignDropdown ? "rotate-180" : ""
+                }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M19 9l-7 7-7-7"
+                ></path>
+              </svg>
+            </button>
+            {showAssignDropdown && (
+              <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg z-10 max-h-48 overflow-y-auto">
+                {users.length > 0 ? (
+                  users.map((user) => (
+                    <label
+                      key={user._id}
+                      className="flex items-center p-2 hover:bg-gray-100 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        value={user._id}
+                        checked={newTask.assignedTo.includes(user._id)}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const updated = newTask.assignedTo.includes(id)
+                            ? newTask.assignedTo.filter((uid) => uid !== id)
+                            : [...newTask.assignedTo, id];
+                          setNewTask({ ...newTask, assignedTo: updated });
+                        }}
+                        className="form-checkbox h-4 w-4 text-blue-600 rounded mr-2"
+                      />
+                      <span className="text-gray-800">
+                        {user.name || user.email}
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <div className="p-2 text-gray-500 text-sm">
+                    No users available.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        <div>
-          <button type="submit">{editingTask ? "Save" : "Add Task"}</button>
+        <div className="flex flex-col sm:flex-row gap-3 mt-4">
+          <button
+            type="submit"
+            className="px-5 py-2 bg-blue-600 text-white rounded-md shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-colors duration-200 flex-1 sm:flex-none"
+          >
+            {editingTask ? "Save Task" : "Add Task"}
+          </button>
           {editingTask && (
-            <button type="button" onClick={resetForm}>
+            <button
+              type="button"
+              onClick={resetForm}
+              className="px-5 py-2 bg-gray-300 text-gray-800 rounded-md shadow-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-colors duration-200 flex-1 sm:flex-none"
+            >
               Cancel
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleSmartAssign}
+            className={`px-5 py-2 rounded-md shadow-md transition-colors duration-200 flex-1 sm:flex-none ${
+              !editingTask
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-green-500 text-white hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-opacity-75"
+            }`}
+            disabled={!editingTask}
+          >
+            Smart Assign
+          </button>
         </div>
       </form>
 
-      {/* Activity Log section */}
-      <div style={{ marginTop: "30px" }}>
-        <h3>Activity Log</h3>
-        <ul>
+      <div className="bg-white p-6 rounded-lg shadow-md">
+        <h3 className="text-xl font-semibold text-gray-700 mb-4">
+          Activity Log
+        </h3>
+        <ul className="space-y-2 max-h-64 overflow-y-auto">
           {activities.map((log, i) => (
-            <li key={i}>
-              {new Date(log.timestamp).toLocaleTimeString()} — {log.type} "
-              {log.details?.title || "Task"}"
+            <li
+              key={i}
+              className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md border border-gray-200"
+            >
+              <span className="font-mono text-gray-500 text-xs mr-2">
+                {new Date(log.timestamp).toLocaleTimeString()}
+              </span>
+              — {formatActivityLog(log)}
             </li>
           ))}
+          {activities.length === 0 && (
+            <li className="text-gray-500 text-center py-4">
+              No activities logged yet.
+            </li>
+          )}
         </ul>
       </div>
     </div>

@@ -1,5 +1,4 @@
 const express = require("express");
-const router = express.Router();
 const verifyToken = require("../middleware/authMiddleware");
 const {
   getTasks,
@@ -10,18 +9,22 @@ const {
   resolveConflict,
 } = require("../controllers/taskController");
 
-router.use(verifyToken); // Protect all routes
+// Export a function that accepts the 'io' instance
+module.exports = (io) => {
+  const router = express.Router();
 
-// Main task routes
-router.get("/", getTasks);
-router.post("/", createTask);
-router.put("/:id", updateTask);
-router.delete("/:id", deleteTask);
+  router.use(verifyToken); // Protect all routes in this router
 
-// Smart assignment route
-router.post("/:id/smart-assign", smartAssign);
+  router.get("/", getTasks);
+  router.post("/", (req, res) => createTask(req, res, io));
+  router.put("/:id", (req, res) => updateTask(req, res, io));
+  router.delete("/:id", (req, res) => deleteTask(req, res, io));
 
-// Conflict resolution
-router.post("/resolve-conflict", resolveConflict);
+  // Smart assignment route - pass 'io'
+  router.post("/:id/smart-assign", (req, res) => smartAssign(req, res, io));
 
-module.exports = router;
+  // Conflict resolution - pass 'io'
+  router.post("/resolve-conflict", (req, res) => resolveConflict(req, res, io));
+
+  return router;
+};
