@@ -6,13 +6,22 @@ const {
   createTask,
   updateTask,
   deleteTask,
+  smartAssign,
+  resolveConflict,
 } = require("../controllers/taskController");
 
-router.use(verifyToken); // protects all task routes
+router.use(verifyToken); // Protect all routes
 
-router.get("/", getTasks); // Fetch all
-router.post("/", createTask); // Create
-router.put("/:id", updateTask); // Update
-router.delete("/:id", deleteTask); // Delete
+// Main task routes
+router.get("/", getTasks);
+router.post("/", createTask);
+router.put("/:id", updateTask);
+router.delete("/:id", deleteTask);
+
+// Smart assignment route
+router.post("/:id/smart-assign", smartAssign);
+
+// Conflict resolution
+router.post("/resolve-conflict", resolveConflict);
 
 module.exports = router;
