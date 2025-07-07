@@ -33,6 +33,11 @@ const TaskSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    dueDate: {
+      // New field for due date
+      type: Date,
+      required: false, // Due date is optional
+    },
     lastModified: {
       type: Date,
       default: Date.now,
@@ -45,6 +50,7 @@ const TaskSchema = new mongoose.Schema(
 
 TaskSchema.index({ status: 1 });
 TaskSchema.index({ assignedTo: 1 });
+TaskSchema.index({ dueDate: 1 }); // Index for efficient querying by due date
 
 const Task = mongoose.models.Task || mongoose.model("Task", TaskSchema);
 

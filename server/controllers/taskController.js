@@ -3,6 +3,7 @@ const User = require("../models/User");
 const Activity = require("../models/Activity");
 const { validationResult } = require("express-validator");
 
+// Emit activity to socket and save in DB
 const logActivity = async (type, taskId, userId, details = {}, io) => {
   try {
     const activity = new Activity({
@@ -24,11 +25,12 @@ const logActivity = async (type, taskId, userId, details = {}, io) => {
 
     return populatedActivity;
   } catch (error) {
-    console.error("Error logging activity:", error);
+    console.error("Error logging activity:", error.message, error.stack);
   }
 };
 
 const getTasks = async (req, res) => {
+  console.log("Backend: getTasks function entered.");
   try {
     const { status, assignedTo, priority, search } = req.query;
     let query = {};
@@ -50,7 +52,7 @@ const getTasks = async (req, res) => {
 
     res.json(tasks);
   } catch (error) {
-    console.error("Error fetching tasks:", error);
+    console.error("getTasks error:", error.message, error.stack);
     res.status(500).json({ message: "Error fetching tasks" });
   }
 };
@@ -62,7 +64,9 @@ const createTask = async (req, res, io) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, description, priority, assignedTo } = req.body;
+    console.log("Received task data:", req.body);
+
+    const { title, description, priority, assignedTo, dueDate } = req.body;
 
     const existingTask = await Task.findOne({ title });
     if (existingTask) {
@@ -81,8 +85,9 @@ const createTask = async (req, res, io) => {
       description,
       priority,
       status: "Todo",
-      assignedTo,
+      assignedTo: Array.isArray(assignedTo) ? assignedTo : [],
       createdBy: req.user.id,
+      dueDate: dueDate || null,
     });
 
     const savedTask = await task.save();
@@ -103,7 +108,7 @@ const createTask = async (req, res, io) => {
 
     res.status(201).json(populatedTask);
   } catch (error) {
-    console.error("Error creating task:", error);
+    console.error("Error creating task:", error.message, error.stack);
     res.status(500).json({ message: "Error creating task" });
   }
 };
@@ -176,6 +181,16 @@ const updateTask = async (req, res, io) => {
       }
     }
 
+    const newDueDate = updates.dueDate
+      ? new Date(updates.dueDate).toISOString().split("T")[0]
+      : null;
+    const existingDueDate = existingTask.dueDate
+      ? existingTask.dueDate.toISOString().split("T")[0]
+      : null;
+    if (newDueDate !== existingDueDate) {
+      changes.dueDate = { from: existingDueDate, to: newDueDate };
+    }
+
     const updatedTask = await Task.findByIdAndUpdate(
       taskId,
       { ...updates, lastModified: Date.now() },
@@ -192,13 +207,11 @@ const updateTask = async (req, res, io) => {
 
     if (Object.keys(changes).length > 0) {
       let activityType = "Task Updated";
-      if (changes.status) {
-        activityType = "Task Status Changed";
-      } else if (changes.assignedTo) {
-        activityType = "Task Assigned";
-      } else if (changes.title) {
-        activityType = "Task Title Changed";
-      }
+      if (changes.status) activityType = "Task Status Changed";
+      else if (changes.assignedTo) activityType = "Task Assigned";
+      else if (changes.title) activityType = "Task Title Changed";
+      else if (changes.dueDate) activityType = "Task Due Date Changed";
+
       await logActivity(
         activityType,
         taskId,
@@ -210,12 +223,7 @@ const updateTask = async (req, res, io) => {
 
     res.json(updatedTask);
   } catch (error) {
-    console.error("Error updating task:", error);
-    if (error.name === "ValidationError") {
-      return res
-        .status(400)
-        .json({ message: error.message, errors: error.errors });
-    }
+    console.error("Error updating task:", error.message, error.stack);
     res.status(500).json({ message: "Error updating task" });
   }
 };
@@ -224,7 +232,6 @@ const deleteTask = async (req, res, io) => {
   try {
     const taskId = req.params.id;
     const task = await Task.findById(taskId);
-
     if (!task) {
       return res.status(404).json({ message: "Task not found" });
     }
@@ -244,7 +251,7 @@ const deleteTask = async (req, res, io) => {
 
     res.json({ message: "Task deleted successfully" });
   } catch (error) {
-    console.error("Error deleting task:", error);
+    console.error("Error deleting task:", error.message, error.stack);
     res.status(500).json({ message: "Error deleting task" });
   }
 };
@@ -253,13 +260,9 @@ const smartAssign = async (req, res, io) => {
   try {
     const taskId = req.params.id;
     const task = await Task.findById(taskId);
-
-    if (!task) {
-      return res.status(404).json({ message: "Task not found" });
-    }
+    if (!task) return res.status(404).json({ message: "Task not found" });
 
     const users = await User.find({}, "_id name email");
-
     const userTaskCounts = await Promise.all(
       users.map(async (user) => {
         const activeTaskCount = await Task.countDocuments({
@@ -294,9 +297,9 @@ const smartAssign = async (req, res, io) => {
       {
         title: task.title,
         assignedTo: smartAssignUser.userId,
-        reason: `Auto-assigned to user with least active tasks (${
+        reason: `Auto-assigned to ${
           smartAssignUser.name || smartAssignUser.email
-        } - ${smartAssignUser.activeTaskCount} active tasks)`,
+        }`,
         userName: req.user.name || req.user.email,
       },
       io
@@ -309,7 +312,7 @@ const smartAssign = async (req, res, io) => {
       } who has the least active tasks (${smartAssignUser.activeTaskCount})`,
     });
   } catch (error) {
-    console.error("Error in smart assign:", error);
+    console.error("Error in smart assign:", error.message, error.stack);
     res.status(500).json({ message: "Error in smart assign" });
   }
 };
@@ -318,7 +321,7 @@ const resolveConflict = async (req, res, io) => {
   try {
     const { taskId, resolution, mergedData } = req.body;
 
-    if (resolution === "merge" || resolution === "overwrite") {
+    if (["merge", "overwrite"].includes(resolution)) {
       const updatedTask = await Task.findByIdAndUpdate(
         taskId,
         { ...mergedData, lastModified: Date.now() },
@@ -332,19 +335,19 @@ const resolveConflict = async (req, res, io) => {
         taskId,
         req.user.id,
         {
-          resolution: resolution,
+          resolution,
           title: updatedTask.title,
           userName: req.user.name || req.user.email,
         },
         io
       );
 
-      res.json(updatedTask);
-    } else {
-      res.status(400).json({ message: "Invalid resolution type" });
+      return res.json(updatedTask);
     }
+
+    res.status(400).json({ message: "Invalid resolution type" });
   } catch (error) {
-    console.error("Error resolving conflict:", error);
+    console.error("Error resolving conflict:", error.message, error.stack);
     res.status(500).json({ message: "Error resolving conflict" });
   }
 };

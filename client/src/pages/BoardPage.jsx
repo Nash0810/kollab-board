@@ -11,7 +11,7 @@ function BoardPage() {
   const [activities, setActivities] = useState([]);
   const [socket, setSocket] = useState(null);
   const [filterByMe, setFilterByMe] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [showAssignDropdown, setShowAssignDropdown] = useState(false);
@@ -24,11 +24,14 @@ function BoardPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState(null);
 
+  const [toast, setToast] = useState(null);
+
   const [newTask, setNewTask] = useState({
     title: "",
     description: "",
     priority: "Medium",
     assignedTo: [],
+    dueDate: "",
   });
 
   const [editingTask, setEditingTask] = useState(null);
@@ -40,47 +43,106 @@ function BoardPage() {
   const statuses = ["Todo", "In Progress", "Done"];
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
 
+  const showToast = useCallback((message, type = "info") => {
+    setToast({ message, type });
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem("token");
     return { Authorization: `Bearer ${token}` };
   }, []);
 
   const fetchTasks = useCallback(async () => {
+    console.log("fetchTasks: Starting fetch...");
     try {
+      console.log(
+        "fetchTasks: Making axios GET request to",
+        `${API_BASE}/api/tasks?search=${searchTerm}&status=${filterStatus}&assignedTo=${filterAssignee}`
+      );
       const params = new URLSearchParams();
       if (searchTerm) params.append("search", searchTerm);
       if (filterStatus) params.append("status", filterStatus);
       if (filterAssignee) params.append("assignedTo", filterAssignee);
 
-      const res = await axios.get(`${API_BASE}/api/tasks?${params}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await axios.get(
+        `${API_BASE}/api/tasks?${params.toString()}`,
+        {
+          headers: getAuthHeaders(),
+          timeout: 10000, // Add a 10-second timeout to catch hangs
+        }
+      );
+      console.log(
+        "fetchTasks: Tasks fetched successfully. Data length:",
+        res.data.length
+      );
       setTasks(res.data);
     } catch (err) {
-      console.error("Failed to fetch tasks:", err);
-      setError("Failed to load tasks");
+      console.error(
+        "fetchTasks: Failed to fetch tasks:",
+        err.message,
+        "Response data:",
+        err.response?.data
+      );
+      // Ensure the error is re-thrown so Promise.allSettled can catch it
+      throw new Error(
+        `Failed to load tasks: ${err.response?.data?.message || err.message}`
+      );
     }
   }, [searchTerm, filterStatus, filterAssignee, getAuthHeaders]);
 
   const fetchUsers = useCallback(async () => {
+    console.log("fetchUsers: Starting fetch...");
     try {
       const res = await axios.get(`${API_BASE}/api/users`, {
         headers: getAuthHeaders(),
+        timeout: 10000,
       });
+      console.log(
+        "fetchUsers: Users fetched successfully. Data length:",
+        res.data.length
+      );
       setUsers(res.data);
     } catch (err) {
-      console.error("Failed to fetch users:", err);
+      console.error(
+        "fetchUsers: Failed to fetch users:",
+        err.message,
+        "Response data:",
+        err.response?.data
+      );
+      throw new Error(
+        `Failed to load users: ${err.response?.data?.message || err.message}`
+      );
     }
   }, [getAuthHeaders]);
 
   const fetchActivities = useCallback(async () => {
+    console.log("fetchActivities: Starting fetch...");
     try {
       const res = await axios.get(`${API_BASE}/api/activities`, {
         headers: getAuthHeaders(),
+        timeout: 10000,
       });
+      console.log(
+        "fetchActivities: Activities fetched successfully. Data length:",
+        res.data.length
+      );
       setActivities(res.data);
     } catch (err) {
-      console.error("Failed to fetch activities:", err);
+      console.error(
+        "fetchActivities: Failed to fetch activities:",
+        err.message,
+        "Response data:",
+        err.response?.data
+      );
+      throw new Error(
+        `Failed to load activities: ${
+          err.response?.data?.message || err.message
+        }`
+      );
     }
   }, [getAuthHeaders]);
 
@@ -101,9 +163,11 @@ function BoardPage() {
 
     socketInstance.on("connect", () => {
       socketInstance.emit("join-user", currentUser.id);
+      console.log("Socket.IO connected.");
     });
 
     socketInstance.on("task-updated", (updatedTaskFromServer) => {
+      console.log("Socket: task-updated received", updatedTaskFromServer);
       setTasks((prevTasks) => {
         const existingTaskIndex = prevTasks.findIndex(
           (t) => t._id === updatedTaskFromServer._id
@@ -119,10 +183,12 @@ function BoardPage() {
     });
 
     socketInstance.on("activity-added", (activity) => {
+      console.log("Socket: activity-added received", activity);
       setActivities((prev) => [activity, ...prev.slice(0, 19)]);
     });
 
     socketInstance.on("edit-conflict", ({ taskId, currentEditor }) => {
+      console.log("Socket: edit-conflict received", taskId, currentEditor);
       if (editingTask && editingTask._id === taskId) {
         setConflictTask(tasks.find((t) => t._id === taskId));
         setLocalChanges(newTask);
@@ -130,25 +196,87 @@ function BoardPage() {
         setEditingTask(null);
         resetForm();
         setError("Conflict detected! Another user is editing this task.");
+        showToast("Conflict detected! Please resolve.", "error");
       }
     });
 
+    socketInstance.on("disconnect", () => {
+      console.log("Socket.IO disconnected.");
+      //showToast("Disconnected from real-time updates.", "error");
+    });
+
+    socketInstance.on("connect_error", (err) => {
+      console.error("Socket.IO connection error:", err.message);
+      showToast(`Socket connection error: ${err.message}`, "error");
+    });
+
     return () => {
+      console.log("Cleaning up socket connection.");
       if (editingTask && socketInstance) {
         socketInstance.emit("stop-editing", editingTask._id);
       }
       socketInstance.disconnect();
     };
-  }, [navigate, currentUser.id, editingTask, newTask, tasks]);
+  }, [navigate, currentUser.id, editingTask, newTask, tasks, showToast]);
 
   useEffect(() => {
     const loadAll = async () => {
+      console.log("loadAll: Starting initial data load...");
       setLoading(true);
-      await Promise.all([fetchTasks(), fetchUsers(), fetchActivities()]);
-      setLoading(false);
+      try {
+        const [tasksResult, usersResult, activitiesResult] =
+          await Promise.allSettled([
+            fetchTasks(),
+            fetchUsers(),
+            fetchActivities(),
+          ]);
+
+        let combinedErrorMessages = [];
+
+        if (tasksResult.status === "rejected") {
+          combinedErrorMessages.push(tasksResult.reason.message);
+          console.error("loadAll: Tasks fetch rejected:", tasksResult.reason);
+        }
+        if (usersResult.status === "rejected") {
+          combinedErrorMessages.push(usersResult.reason.message);
+          console.error("loadAll: Users fetch rejected:", usersResult.reason);
+        }
+        if (activitiesResult.status === "rejected") {
+          combinedErrorMessages.push(activitiesResult.reason.message);
+          console.error(
+            "loadAll: Activities fetch rejected:",
+            activitiesResult.reason
+          );
+        }
+
+        if (combinedErrorMessages.length > 0) {
+          const finalErrorMessage = combinedErrorMessages.join(" | ");
+          setError(finalErrorMessage);
+          showToast(finalErrorMessage, "error");
+          console.log("loadAll: Initial data load completed with errors.");
+        } else {
+          setError("");
+          console.log("loadAll: Initial data load completed successfully.");
+        }
+      } catch (err) {
+        console.error(
+          "loadAll: Unexpected error during initial data load:",
+          err
+        );
+        setError(
+          err.message || "An unexpected error occurred during board load."
+        );
+        showToast(
+          err.message || "An unexpected error occurred during board load.",
+          "error"
+        );
+      } finally {
+        setLoading(false);
+        console.log("loadAll: setLoading(false) called.");
+      }
     };
     loadAll();
-  }, [fetchTasks, fetchUsers, fetchActivities]);
+  }, [fetchTasks, fetchUsers, fetchActivities, showToast]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -171,9 +299,14 @@ function BoardPage() {
         headers: getAuthHeaders(),
       });
       socket?.emit("task-updated", res.data);
+      showToast("Task updated successfully!", "success");
       return res.data;
     } catch (err) {
       console.error("Failed to update task:", err);
+      showToast(
+        err.response?.data?.message || "Failed to update task.",
+        "error"
+      );
       throw err;
     }
   };
@@ -187,9 +320,14 @@ function BoardPage() {
       setTasks((prevTasks) => [...prevTasks, res.data]);
       socket?.emit("task-updated", res.data);
       resetForm();
+      showToast("Task created successfully!", "success");
     } catch (err) {
       console.error("Failed to create task:", err);
       setError("Failed to create task.");
+      showToast(
+        err.response?.data?.message || "Failed to create task.",
+        "error"
+      );
     }
   };
 
@@ -211,11 +349,16 @@ function BoardPage() {
       socket?.emit("task-updated", { type: "delete", id: taskToDelete._id });
       setTaskToDelete(null);
       setShowDeleteModal(false);
+      showToast("Task deleted successfully!", "success");
     } catch (err) {
       console.error("Delete error:", err);
       setError("Failed to delete task.");
       setTaskToDelete(null);
       setShowDeleteModal(false);
+      showToast(
+        err.response?.data?.message || "Failed to delete task.",
+        "error"
+      );
     }
   };
 
@@ -249,6 +392,10 @@ function BoardPage() {
         )
       );
       setError("Failed to save changes. Please try again.");
+      showToast(
+        err.response?.data?.message || "Failed to save changes.",
+        "error"
+      );
     } finally {
       resetForm();
     }
@@ -274,6 +421,9 @@ function BoardPage() {
             ? [task.assignedTo._id]
             : [task.assignedTo]
           ).filter(Boolean),
+      dueDate: task.dueDate
+        ? new Date(task.dueDate).toISOString().split("T")[0]
+        : "",
     });
     setError("");
   };
@@ -285,6 +435,7 @@ function BoardPage() {
       description: "",
       priority: "Medium",
       assignedTo: [],
+      dueDate: "",
     });
     setShowAssignDropdown(false);
     setError("");
@@ -332,6 +483,7 @@ function BoardPage() {
 
     try {
       await updateTask(taskId, { status: newStatus });
+      showToast(`Task status updated to "${newStatus}"!`, "success");
     } catch (err) {
       console.error("Failed to update task status on backend:", err);
       setTasks((prevTasks) => {
@@ -343,6 +495,10 @@ function BoardPage() {
         );
       });
       setError("Failed to update task status. Please try again.");
+      showToast(
+        err.response?.data?.message || "Failed to update task status.",
+        "error"
+      );
     } finally {
       setDraggedTaskId(null);
     }
@@ -350,7 +506,7 @@ function BoardPage() {
 
   const handleSmartAssign = async () => {
     if (!editingTask) {
-      setError("Please select or create a task to smart assign.");
+      showToast("Please select or create a task to smart assign.", "info");
       return;
     }
     try {
@@ -368,9 +524,14 @@ function BoardPage() {
           : [res.data.task.assignedTo._id],
       }));
       console.log("Smart assign successful:", res.data.smartAssignReason);
+      showToast("Task smart-assigned successfully!", "success");
     } catch (err) {
       console.error("Failed to smart assign task:", err);
       setError("Failed to smart assign task. Please try again.");
+      showToast(
+        err.response?.data?.message || "Failed to smart assign task.",
+        "error"
+      );
     }
   };
 
@@ -431,6 +592,10 @@ function BoardPage() {
         const oldTitle = log.details?.title?.from || "Unknown Title";
         const newTitle = log.details?.title?.to || "Unknown Title";
         return `${userName} changed title of "${oldTitle}" to "${newTitle}"`;
+      case "Task Due Date Changed":
+        const oldDueDate = log.details?.dueDate?.from || "None";
+        const newDueDate = log.details?.dueDate?.to || "None";
+        return `${userName} changed due date of "${taskTitle}" from ${oldDueDate} to ${newDueDate}`;
       case "Conflict Resolved":
         return `${userName} resolved a conflict for "${taskTitle}" (${log.details?.resolution} method)`;
       default:
@@ -450,6 +615,7 @@ function BoardPage() {
         status: localChanges.status || conflictTask.status,
         assignedTo:
           localChanges.assignedTo || conflictTask.assignedTo.map((u) => u._id),
+        dueDate: localChanges.dueDate || conflictTask.dueDate,
       };
     } else if (resolutionType === "overwrite") {
       mergedData = {
@@ -458,6 +624,7 @@ function BoardPage() {
         priority: localChanges.priority,
         status: localChanges.status,
         assignedTo: localChanges.assignedTo,
+        dueDate: localChanges.dueDate,
       };
     } else if (resolutionType === "discard") {
       mergedData = {
@@ -466,6 +633,7 @@ function BoardPage() {
         priority: conflictTask.priority,
         status: conflictTask.status,
         assignedTo: conflictTask.assignedTo.map((u) => u._id),
+        dueDate: conflictTask.dueDate,
       };
     }
 
@@ -489,9 +657,14 @@ function BoardPage() {
       setLocalChanges(null);
       setConflictEditor(null);
       setError("");
+      showToast("Conflict resolved successfully!", "success");
     } catch (err) {
       console.error("Failed to resolve conflict:", err);
       setError("Failed to resolve conflict. Please try again.");
+      showToast(
+        err.response?.data?.message || "Failed to resolve conflict.",
+        "error"
+      );
     }
   };
 
@@ -500,16 +673,66 @@ function BoardPage() {
     return editor ? editor.name || editor.email : "Another User";
   };
 
+  const getDueDateDisplay = (dateString) => {
+    if (!dateString) return "No due date";
+    const date = new Date(dateString);
+    if (isNaN(date)) return "Invalid date";
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const taskDate = new Date(dateString);
+    taskDate.setHours(0, 0, 0, 0);
+
+    const diffTime = taskDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      return (
+        <span className="text-red-600 font-semibold">
+          Overdue ({date.toLocaleDateString()})
+        </span>
+      );
+    } else if (diffDays === 0) {
+      return (
+        <span className="text-orange-500 font-semibold">
+          Due Today ({date.toLocaleDateString()})
+        </span>
+      );
+    } else if (diffDays === 1) {
+      return (
+        <span className="text-yellow-600">
+          Due Tomorrow ({date.toLocaleDateString()})
+        </span>
+      );
+    } else {
+      return `Due: ${date.toLocaleDateString()}`;
+    }
+  };
+
   if (loading) {
     return <div className="p-5 text-lg text-gray-700">Loading board...</div>;
   }
 
-  if (error && !conflictTask) {
+  if (error) {
     return <div className="p-5 text-lg text-red-600">Error: {error}</div>;
   }
 
   return (
     <div className="min-h-screen bg-gray-100 p-5 font-sans">
+      {toast && (
+        <div
+          className={`fixed top-5 right-5 p-4 rounded-md shadow-lg text-white z-50
+          ${
+            toast.type === "success"
+              ? "bg-green-500"
+              : toast.type === "error"
+              ? "bg-red-500"
+              : "bg-blue-500"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-3xl font-bold text-gray-800">
           Kollab Board — Welcome,{" "}
@@ -521,6 +744,7 @@ function BoardPage() {
           onClick={() => {
             localStorage.clear();
             navigate("/");
+            showToast("Logged out successfully!", "info");
           }}
           className="px-4 py-2 bg-red-500 text-white rounded-md shadow-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75 transition-colors duration-200"
         >
@@ -577,6 +801,9 @@ function BoardPage() {
                   </p>
                   <p className="text-xs text-gray-500 mb-2">
                     <b>Priority:</b> {task.priority}
+                  </p>
+                  <p className="text-xs text-gray-500 mb-2">
+                    <b>Due Date:</b> {getDueDateDisplay(task.dueDate)}
                   </p>
                   <p className="text-xs text-gray-500 mb-3">
                     <b>Assigned to:</b> {getUserNames(task.assignedTo)}
@@ -635,6 +862,24 @@ function BoardPage() {
             <option>Medium</option>
             <option>High</option>
           </select>
+
+          <div>
+            <label
+              htmlFor="dueDate"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
+              Due Date:
+            </label>
+            <input
+              type="date"
+              id="dueDate"
+              value={newTask.dueDate}
+              onChange={(e) =>
+                setNewTask({ ...newTask, dueDate: e.target.value })
+              }
+              className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
 
           <div className="relative" ref={assignDropdownRef}>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -790,6 +1035,9 @@ function BoardPage() {
                 <p className="text-sm text-gray-700">
                   <b>Assigned To:</b> {getUserNames(conflictTask.assignedTo)}
                 </p>
+                <p className="text-sm text-gray-700">
+                  <b>Due Date:</b> {getDueDateDisplay(conflictTask.dueDate)}
+                </p>
               </div>
 
               <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
@@ -810,6 +1058,9 @@ function BoardPage() {
                 </p>
                 <p className="text-sm text-gray-700">
                   <b>Assigned To:</b> {getUserNames(localChanges.assignedTo)}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <b>Due Date:</b> {getDueDateDisplay(localChanges.dueDate)}
                 </p>
               </div>
             </div>
@@ -838,7 +1089,6 @@ function BoardPage() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
       {showDeleteModal && taskToDelete && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
