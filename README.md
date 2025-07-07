@@ -1,12 +1,15 @@
 # 🚀 Kollab Board - Real-Time Collaborative To-Do App
 
-A **full-stack Kanban-style task management tool** with real-time collaboration, user authentication, smart task assignment, and conflict resolution. 
+**Kollab Board** is a real-time collaborative task management application built from the ground up using the MERN stack. Designed for teams, it provides a smooth and intuitive interface to organize work into tasks across a Kanban-style board. Users can log in securely, create and assign tasks, and drag them across different stages—Todo, In Progress, and Done.
+
+What sets Kollab Board apart is its **real-time WebSocket-powered collaboration**, **conflict resolution handling**, and **smart task assignment**. All changes made by one user are instantly visible to others, and if multiple users attempt to edit the same task, the system gracefully detects and resolves conflicts. Every action is also recorded in a live activity log, ensuring transparency and traceability for all changes made on the board.
 
 ---
 
 ## 🌍 Live Demo
 
 Frontend (React + Vite): [https://your-frontend.vercel.app](https://your-frontend.vercel.app)
+
 Backend (Express + MongoDB): [https://your-backend.onrender.com](https://your-backend.onrender.com)
 
 ---
