@@ -2,7 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
 
-const API_BASE = "http://localhost:5000"; // Ensure this matches your backend URL
+const API_BASE = "https://kollab-board.onrender.com"; // Ensure this matches your backend URL
 
 function LoginPage() {
   const [form, setForm] = useState({ email: "", password: "" });
