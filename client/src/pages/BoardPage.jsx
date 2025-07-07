@@ -3,7 +3,7 @@ import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
 import { io } from "socket.io-client";
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = "https://kollab-board.onrender.com";
 
 function BoardPage() {
   const [tasks, setTasks] = useState([]);
