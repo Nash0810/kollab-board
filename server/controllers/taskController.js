@@ -86,7 +86,7 @@ const createTask = async (req, res, io) => {
       priority,
       status: "Todo",
       assignedTo: Array.isArray(assignedTo) ? assignedTo : [],
-      createdBy: req.user.id || "unknown",
+      createdBy: req.user.id,
       dueDate: dueDate || null,
     });
 
