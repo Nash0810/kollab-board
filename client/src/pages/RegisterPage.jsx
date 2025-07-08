@@ -53,7 +53,7 @@ function RegisterPage() {
       );
       // Optionally, clear form after successful registration
       setForm({ name: "", email: "", password: "" });
-      // navigate("/"); // Uncomment to auto-navigate to login after success
+      navigate("/"); // Uncomment to auto-navigate to login after success
     } catch (err) {
       console.error("Registration failed:", err);
       setError(
