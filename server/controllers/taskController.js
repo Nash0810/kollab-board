@@ -199,6 +199,9 @@ const updateTask = async (req, res, io) => {
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email");
 
+    if (io && updatedTask) {
+      io.emit("task-updated", updatedTask);
+    }
     if (!updatedTask) {
       return res
         .status(404)
@@ -289,7 +292,9 @@ const smartAssign = async (req, res, io) => {
     )
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email");
-
+    if (io && updatedTask) {
+      io.emit("task-updated", updatedTask);
+    }
     await logActivity(
       "Task Assigned (Smart)",
       taskId,
@@ -329,7 +334,9 @@ const resolveConflict = async (req, res, io) => {
       )
         .populate("assignedTo", "name email")
         .populate("createdBy", "name email");
-
+      if (io && updatedTask) {
+        io.emit("task-updated", updatedTask);
+      }
       await logActivity(
         "Conflict Resolved",
         taskId,
