@@ -12,6 +12,7 @@ const ActivitySchema = new mongoose.Schema(
         "Task Assigned",
         "Task Status Changed",
         "Comment Added",
+        "Task Assigned (Smart)",
       ],
     },
     taskId: {
