@@ -155,6 +155,7 @@ function BoardPage() {
 
     const socketInstance = io(API_BASE, {
       auth: { token },
+      transports: ["websocket"],
       autoConnect: false,
     });
 
