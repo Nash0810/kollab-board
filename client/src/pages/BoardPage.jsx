@@ -214,14 +214,7 @@ function BoardPage() {
         );
 
         console.log("Retry attempt", attempts, "Matched task:", matchedTask);
-        const hasLocalEdits =
-          newTask.title ||
-          newTask.description ||
-          newTask.dueDate ||
-          newTask.priority !== "Medium" ||
-          newTask.assignedTo.length > 0;
-
-        if (matchedTask && hasLocalEdits) {
+        if (matchedTask) {
           setConflictTask(matchedTask);
           setLocalChanges({ ...newTask });
           setConflictEditor(currentEditor);
