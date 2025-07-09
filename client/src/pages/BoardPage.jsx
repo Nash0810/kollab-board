@@ -215,7 +215,7 @@ function BoardPage() {
 
         console.log("Retry attempt", attempts, "Matched task:", matchedTask);
 
-        if (matchedTask && newTask?.title) {
+        if (matchedTask) {
           setConflictTask(matchedTask);
           setLocalChanges({ ...newTask });
           setConflictEditor(currentEditor);
