@@ -170,30 +170,28 @@ function BoardPage() {
     socketInstance.on("task-updated", (updatedTaskFromServer) => {
       console.log("Socket: task-updated received", updatedTaskFromServer);
 
-      if (
-        updatedTaskFromServer?.type === "delete" &&
-        updatedTaskFromServer?.id
-      ) {
-        setTasks((prevTasks) =>
-          prevTasks.filter((t) => t._id !== updatedTaskFromServer.id)
+      if (updatedTaskFromServer.deleted) {
+        setTasks((prev) =>
+          prev.filter((t) => t._id !== updatedTaskFromServer._id)
         );
+        fetchActivities();
         return;
       }
 
-      if (updatedTaskFromServer?._id) {
-        setTasks((prevTasks) => {
-          const existingTaskIndex = prevTasks.findIndex(
-            (t) => t._id === updatedTaskFromServer._id
-          );
-          if (existingTaskIndex > -1) {
-            const newTasks = [...prevTasks];
-            newTasks[existingTaskIndex] = updatedTaskFromServer;
-            return newTasks;
-          } else {
-            return [...prevTasks, updatedTaskFromServer];
-          }
-        });
-      }
+      setTasks((prevTasks) => {
+        const existingTaskIndex = prevTasks.findIndex(
+          (t) => t._id === updatedTaskFromServer._id
+        );
+        if (existingTaskIndex > -1) {
+          const newTasks = [...prevTasks];
+          newTasks[existingTaskIndex] = updatedTaskFromServer;
+          return newTasks;
+        } else {
+          return [...prevTasks, updatedTaskFromServer];
+        }
+      });
+
+      fetchActivities();
     });
 
     socketInstance.on("activity-added", (activity) => {
