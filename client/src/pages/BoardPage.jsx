@@ -163,8 +163,9 @@ function BoardPage() {
     setSocket(socketInstance);
 
     socketInstance.on("connect", () => {
+      console.log("Connected to socket with ID:", socketInstance.id);
+      console.log("Sending join-user with userId:", currentUser.id);
       socketInstance.emit("join-user", currentUser.id);
-      console.log("Socket.IO connected.");
     });
 
     socketInstance.on("task-updated", (updatedTaskFromServer) => {
@@ -415,7 +416,7 @@ function BoardPage() {
   };
 
   const startEdit = (task) => {
-    if (socket) {
+    if (socket?.connected) {
       socket.emit("start-editing", task._id);
     }
 

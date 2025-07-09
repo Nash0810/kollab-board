@@ -60,13 +60,11 @@ io.on("connection", (socket) => {
   });
 
   socket.on("start-editing", (taskId) => {
-    console.log(`start-editing received from ${socket.id} for task ${taskId}`);
-    console.log("Current userId:", socket.userId);
-    console.log("activeEditors:", activeEditors);
+    console.log(`start-editing from ${socket.userId} on task ${taskId}`);
 
     if (activeEditors[taskId] && activeEditors[taskId] !== socket.userId) {
       console.log(
-        `Conflict: task ${taskId} is already being edited by ${activeEditors[taskId]}`
+        `Conflict detected! Task ${taskId} already being edited by ${activeEditors[taskId]}`
       );
       socket.emit("edit-conflict", {
         taskId,
@@ -74,8 +72,11 @@ io.on("connection", (socket) => {
       });
     } else {
       activeEditors[taskId] = socket.userId;
-      console.log(`Task ${taskId} is now locked by ${socket.userId}`);
-      socket.broadcast.emit("task-locked", { taskId, editorId: socket.userId });
+      console.log(`Task ${taskId} locked by ${socket.userId}`);
+      socket.broadcast.emit("task-locked", {
+        taskId,
+        editorId: socket.userId,
+      });
     }
   });
 
