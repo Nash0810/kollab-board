@@ -207,16 +207,27 @@ function BoardPage() {
       console.log("Matched task:", task);
       console.log("newTask (form state):", newTask);
 
-      if (!task) return;
+      // Safety check: if task is not yet in state, wait and retry
+      if (!task || !newTask.title) {
+        console.warn(
+          "Task or newTask not ready — retrying conflict handling..."
+        );
+
+        // Retry after delay
+        setTimeout(() => {
+          const retryTask = tasks.find((t) => t._id === taskId);
+          setConflictTask(retryTask || null);
+          setLocalChanges({ ...newTask });
+          setConflictEditor(currentEditor);
+          resetForm();
+        }, 200); // wait 200ms to let setState flush
+        return;
+      }
 
       setConflictTask(task);
-      setLocalChanges(newTask);
+      setLocalChanges({ ...newTask });
       setConflictEditor(currentEditor);
-
-      setEditingTask(null);
       resetForm();
-
-      showToast("Conflict detected! Please resolve.", "error");
     });
 
     socketInstance.on("disconnect", () => {
