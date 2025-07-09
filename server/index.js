@@ -3,6 +3,12 @@ const User = require("./models/User");
 const Activity = require("./models/Activity");
 const { validationResult } = require("express-validator");
 
+try {
+  // your existing code
+} catch (err) {
+  console.error("Startup error:", err);
+}
+
 // Emit activity to socket and save in DB
 const logActivity = async (type, taskId, userId, details = {}, io) => {
   try {
