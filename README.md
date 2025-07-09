@@ -8,9 +8,9 @@ What sets Kollab Board apart is its **real-time WebSocket-powered collaboration*
 
 ## 🌍 Live Demo
 
-Frontend (React + Vite): [https://your-frontend.vercel.app](https://your-frontend.vercel.app)
+Frontend (React + Vite): [https://kollab-board.vercel.app](https://kollab-board.vercel.app/)
 
-Backend (Express + MongoDB): [https://your-backend.onrender.com](https://your-backend.onrender.com)
+Backend (Express + MongoDB): [https://kollab-board.onrender.com](https://kollab-board.onrender.com/)
 
 ---
 
@@ -18,21 +18,21 @@ Backend (Express + MongoDB): [https://your-backend.onrender.com](https://your-ba
 
 ### Frontend
 
-* React (Vite)
-* React Router
-* Axios
-* Socket.IO client
-* Tailwind CSS (optional: hand-styled if Tailwind wasn't used)
+- React (Vite)
+- React Router
+- Axios
+- Socket.IO client
+- Pure custom CSS (no CSS frameworks used)
 
 ### Backend
 
-* Node.js
-* Express.js
-* MongoDB with Mongoose
-* JWT for authentication
-* bcrypt for password hashing
-* Socket.IO for real-time updates
-* dotenv for env management
+- Node.js
+- Express.js
+- MongoDB with Mongoose
+- JWT for authentication
+- bcrypt for password hashing
+- Socket.IO for real-time updates
+- dotenv for env management
 
 ---
 
@@ -40,59 +40,59 @@ Backend (Express + MongoDB): [https://your-backend.onrender.com](https://your-ba
 
 ### 1. 🔐 User Authentication
 
-* Registration and login using JWT
-* Passwords hashed securely with bcrypt
-* Auth-protected routes (middleware based)
+- Registration and login using JWT
+- Passwords hashed securely with bcrypt
+- Auth-protected routes (middleware based)
 
 ### 2. 📅 Task Management
 
-* CRUD operations for tasks
-* Each task includes:
+- CRUD operations for tasks
+- Each task includes:
 
-  * Title (unique)
-  * Description
-  * Status: Todo, In Progress, Done
-  * Priority: Low, Medium, High
-  * Assigned Users
-  * Due Date (optional)
+  - Title (unique)
+  - Description
+  - Status: Todo, In Progress, Done
+  - Priority: Low, Medium, High
+  - Assigned Users
+  - Due Date (optional)
 
 ### 3. 📆 Real-Time Sync
 
-* All task changes (add/update/delete) are reflected live via WebSocket (Socket.IO)
-* Activity logs update in real-time
-* Editing conflicts detected live (see below)
+- All task changes (add/update/delete) are reflected live via WebSocket (Socket.IO)
+- Activity logs update in real-time
+- Editing conflicts detected live (see below)
 
 ### 4. ✏️ Conflict Detection & Resolution
 
-* If two users edit the same task simultaneously, a conflict is detected
-* UI shows both versions (local + server)
-* Users choose to:
+- If two users edit the same task simultaneously, a conflict is detected
+- UI shows both versions (local + server)
+- Users choose to:
 
-  * Merge
-  * Overwrite
-  * Discard changes
+  - Merge
+  - Overwrite
+  - Discard changes
 
 ### 5. ✨ Smart Assignment
 
-* Button to auto-assign task to the user with **fewest active tasks** (status: Todo/In Progress)
-* Includes logging of assignment and reasoning
+- Button to auto-assign task to the user with **fewest active tasks** (status: Todo/In Progress)
+- Includes logging of assignment and reasoning
 
 ### 6. 📈 Activity Log
 
-* Every action (create/edit/delete/assign/drag-drop/conflict) is logged
-* REST API returns last 20 actions
-* Real-time UI updates
+- Every action (create/edit/delete/assign/drag-drop/conflict) is logged
+- REST API returns last 20 actions
+- Real-time UI updates
 
 ### 7. 🔄 Drag and Drop Kanban Board
 
-* Tasks can be moved across columns via drag-and-drop
-* Optimistic UI updates with error fallback
-* Custom styling and animation
+- Tasks can be moved across columns via drag-and-drop
+- Optimistic UI updates with error fallback
+- Custom styling and animation
 
 ### 8. 🌐 Responsive UI (No UI libraries used)
 
-* Custom-built from scratch using CSS
-* Fully responsive for desktop and mobile
+- Custom-built from scratch using CSS
+- Fully responsive for desktop and mobile
 
 ---
 
@@ -115,8 +115,8 @@ npm install
 npm run dev
 ```
 
-* Frontend runs at: `http://localhost:5173`
-* Backend runs at: `http://localhost:5000`
+- Frontend runs at: `http://localhost:5173`
+- Backend runs at: `http://localhost:5000`
 
 ---
 
@@ -124,27 +124,29 @@ npm run dev
 
 ### Smart Assign Logic
 
-* On "Smart Assign" button click:
+- On "Smart Assign" button click:
 
-  * Fetch all users
-  * Count their currently assigned active tasks (Todo/In Progress)
-  * Assign task to the user with the **least active load**
+  - Fetch all users
+  - Count their currently assigned active tasks (Todo/In Progress)
+  - Assign task to the user with the **least active load**
 
 ### Conflict Handling
 
-* When editing a task:
+- When editing a task:
 
-  * Socket emits `start-editing`
-  * If another user also starts editing, both are notified
-* If conflict is detected:
+  - Socket emits `start-editing`
+  - If another user also starts editing, both are notified
 
-  * Server version vs. local version is shown
-  * User can resolve by:
+- If conflict is detected:
 
-    * Merging
-    * Overwriting
-    * Discarding
-* Backend ensures correct state is persisted
+  - Server version vs. local version is shown
+  - User can resolve by:
+
+    - Merging
+    - Overwriting
+    - Discarding
+
+- Backend ensures correct state is persisted
 
 ---
 
@@ -175,19 +177,19 @@ kollab-board/
 
 Covers:
 
-* Login/Register
-* Create & edit tasks
-* Drag and drop
-* Smart Assign
-* Real-time updates
-* Conflict resolution
+- Login/Register
+- Create & edit tasks
+- Drag and drop
+- Smart Assign
+- Real-time updates
+- Conflict resolution
 
 ---
 
 ## 🚀 Next Goals 
 
-* Board-level access control (multi-board support)
-* Notifications for task changes
-* Better animations + accessibility
+- Board-level access control (multi-board support)
+- Notifications for task changes
+- Better animations + accessibility
 
 ---

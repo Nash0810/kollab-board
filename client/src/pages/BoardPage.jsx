@@ -201,6 +201,7 @@ function BoardPage() {
 
     socketInstance.on("edit-conflict", ({ taskId, currentEditor }) => {
       console.log("Socket: edit-conflict received", taskId, currentEditor);
+
       if (editingTask && editingTask._id === taskId) {
         setConflictTask(tasks.find((t) => t._id === taskId));
         setLocalChanges(newTask);

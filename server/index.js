@@ -39,47 +39,62 @@ app.use("/api/activities", activityRoutesFn(io));
 
 const activeEditors = {};
 
+// Socket.IO event handling
 io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   socket.on("join-user", (userId) => {
+    console.log(`User ${userId} joined with socket ${socket.id}`);
     socket.join(`user-${userId}`);
     socket.userId = userId;
   });
 
   socket.on("join-task-room", (taskId) => {
+    console.log(`Socket ${socket.id} joined task room ${taskId}`);
     socket.join(taskId);
   });
 
   socket.on("leave-task-room", (taskId) => {
+    console.log(`Socket ${socket.id} left task room ${taskId}`);
     socket.leave(taskId);
   });
 
   socket.on("start-editing", (taskId) => {
+    console.log(`start-editing received from ${socket.id} for task ${taskId}`);
+    console.log("Current userId:", socket.userId);
+    console.log("activeEditors:", activeEditors);
+
     if (activeEditors[taskId] && activeEditors[taskId] !== socket.userId) {
+      console.log(
+        `Conflict: task ${taskId} is already being edited by ${activeEditors[taskId]}`
+      );
       socket.emit("edit-conflict", {
         taskId,
         currentEditor: activeEditors[taskId],
       });
     } else {
       activeEditors[taskId] = socket.userId;
+      console.log(`Task ${taskId} is now locked by ${socket.userId}`);
       socket.broadcast.emit("task-locked", { taskId, editorId: socket.userId });
     }
   });
 
   socket.on("stop-editing", (taskId) => {
+    console.log(`stop-editing from ${socket.userId} on task ${taskId}`);
     if (activeEditors[taskId] === socket.userId) {
       delete activeEditors[taskId];
       socket.broadcast.emit("task-unlocked", { taskId });
+      console.log(`Task ${taskId} unlocked`);
     }
   });
 
   socket.on("disconnect", () => {
-    console.log(`Disconnected: ${socket.id}`);
+    console.log(`🔌 Disconnected: ${socket.id} (userId: ${socket.userId})`);
     for (const [taskId, editorId] of Object.entries(activeEditors)) {
       if (editorId === socket.userId) {
         delete activeEditors[taskId];
         io.emit("task-unlocked", { taskId });
+        console.log(`Task ${taskId} unlocked due to disconnect`);
       }
     }
   });
