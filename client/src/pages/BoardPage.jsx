@@ -204,14 +204,18 @@ function BoardPage() {
       console.log("Socket: edit-conflict received", taskId, currentEditor);
 
       const task = tasks.find((t) => t._id === taskId);
+      console.log("Matched task:", task);
+      console.log("newTask (form state):", newTask);
+
       if (!task) return;
 
       setConflictTask(task);
       setLocalChanges(newTask);
       setConflictEditor(currentEditor);
+
       setEditingTask(null);
       resetForm();
-      setError("Conflict detected! Another user is editing this task.");
+
       showToast("Conflict detected! Please resolve.", "error");
     });
 
@@ -746,9 +750,15 @@ function BoardPage() {
     return <div className="p-5 text-lg text-gray-700">Loading board...</div>;
   }
 
-  if (error) {
-    return <div className="p-5 text-lg text-red-600">Error: {error}</div>;
+  {
+    error && (
+      <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+        {error}
+      </div>
+    );
   }
+
+  console.log("Modal visibility check:", { conflictTask, localChanges });
 
   return (
     <div className="min-h-screen bg-gray-100 p-5 font-sans">
