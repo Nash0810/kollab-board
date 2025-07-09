@@ -416,8 +416,11 @@ function BoardPage() {
   };
 
   const startEdit = (task) => {
-    if (socket?.connected) {
+    if (socket && socket.connected) {
+      console.log("Emitting start-editing for task", task._id);
       socket.emit("start-editing", task._id);
+    } else {
+      console.warn("Socket not connected, cannot emit start-editing");
     }
 
     setEditingTask(task);

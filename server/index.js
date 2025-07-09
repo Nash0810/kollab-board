@@ -60,6 +60,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("start-editing", (taskId) => {
+    if (!socket.userId) {
+      console.warn(
+        "start-editing received without userId on socket:",
+        socket.id
+      );
+      return;
+    }
+
     console.log(`start-editing from ${socket.userId} on task ${taskId}`);
 
     if (activeEditors[taskId] && activeEditors[taskId] !== socket.userId) {
