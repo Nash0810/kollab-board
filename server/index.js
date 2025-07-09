@@ -1,6 +1,6 @@
 const Task = require("./models/Task");
-const User = require("../models/User");
-const Activity = require("../models/Activity");
+const User = require("./models/User");
+const Activity = require("./models/Activity");
 const { validationResult } = require("express-validator");
 
 // Emit activity to socket and save in DB
