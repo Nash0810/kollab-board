@@ -202,43 +202,30 @@ function BoardPage() {
 
     socketInstance.on("edit-conflict", ({ taskId, currentEditor }) => {
       console.log("Socket: edit-conflict received", taskId, currentEditor);
-
-      const task = tasks.find((t) => t._id === taskId);
-      console.log("Matched task:", task);
       console.log("newTask (form state):", newTask);
 
-      // Immediate check
-      if (!task || !newTask.title) {
-        console.warn(
-          "Task or newTask not ready — retrying conflict handling..."
-        );
+      let attempts = 0;
 
-        setTimeout(() => {
-          const retryTask = tasks.find((t) => t._id === taskId);
-          console.log("Retry Matched task:", retryTask);
+      const retryUntilTaskLoaded = () => {
+        const matchedTask = tasks.find((t) => t._id === taskId);
+        console.log("🔁 Retry attempt", attempts, "Matched task:", matchedTask);
 
-          if (retryTask) {
-            setConflictTask(retryTask);
-          } else {
-            console.error("Retry failed: still no task matched for conflict");
-          }
-
-          if (newTask.title) {
-            setLocalChanges({ ...newTask });
-          } else {
-            console.warn("Retry failed: newTask is still empty");
-          }
-
+        if (matchedTask && newTask?.title) {
+          setConflictTask(matchedTask);
+          setLocalChanges({ ...newTask });
           setConflictEditor(currentEditor);
+          setEditingTask(null);
           resetForm();
-        }, 200);
-        return;
-      }
+          showToast("Conflict detected! Resolve below.", "error");
+        } else if (attempts < 10) {
+          attempts++;
+          setTimeout(retryUntilTaskLoaded, 200);
+        } else {
+          console.warn("Conflict retry failed after multiple attempts.");
+        }
+      };
 
-      setConflictTask(task);
-      setLocalChanges({ ...newTask });
-      setConflictEditor(currentEditor);
-      resetForm();
+      retryUntilTaskLoaded();
     });
 
     socketInstance.on("disconnect", () => {
