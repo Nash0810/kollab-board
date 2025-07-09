@@ -95,13 +95,20 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log(`🔌 Disconnected: ${socket.id} (userId: ${socket.userId})`);
-    for (const [taskId, editorId] of Object.entries(activeEditors)) {
-      if (editorId === socket.userId) {
-        delete activeEditors[taskId];
-        io.emit("task-unlocked", { taskId });
+    console.log(`Disconnected: ${socket.id} (userId: ${socket.userId})`);
+
+    // Delay cleanup to prevent flickers from quick reconnects
+    setTimeout(() => {
+      for (const [taskId, editorId] of Object.entries(activeEditors)) {
+        if (editorId === socket.userId) {
+          delete activeEditors[taskId];
+          io.emit("task-unlocked", { taskId });
+          console.log(
+            `Removed editor lock for task ${taskId} from ${editorId}`
+          );
+        }
       }
-    }
+    }, 5000); // wait 5 seconds to see if they reconnect
   });
 });
 
