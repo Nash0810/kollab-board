@@ -207,7 +207,8 @@ function BoardPage() {
       let attempts = 0;
 
       const retryUntilTaskLoaded = () => {
-        const matchedTask = tasks.find((t) => t._id === taskId);
+        const matchedTask = tasks.find((t) => String(t._id) === String(taskId));
+
         console.log("🔁 Retry attempt", attempts, "Matched task:", matchedTask);
 
         if (matchedTask && newTask?.title) {
