@@ -37,7 +37,9 @@ app.use("/api/tasks", taskRoutesFn(io));
 app.use("/api/comments", commentRoutesFn(io));
 app.use("/api/activities", activityRoutesFn(io));
 
-const activeEditors = {}; // taskId -> userId
+const activeEditors = {
+  [taskId]: { userId: "...", timestamp: Date },
+}; // taskId -> userId
 
 const jwt = require("jsonwebtoken");
 
@@ -78,26 +80,21 @@ io.on("connection", (socket) => {
   });
 
   socket.on("start-editing", (taskId) => {
-    if (!socket.userId) {
-      console.warn(
-        "Received start-editing before userId set on socket:",
-        socket.id
-      );
-      return;
-    }
+    const editor = activeEditors[taskId];
 
-    console.log(`start-editing from ${socket.userId} on task ${taskId}`);
-
-    if (activeEditors[taskId] && activeEditors[taskId] !== socket.userId) {
+    if (editor && editor.userId !== socket.userId) {
       console.log(
-        `Conflict! Task ${taskId} already being edited by ${activeEditors[taskId]}`
+        `Conflict detected: Task ${taskId} already locked by ${editor.userId}`
       );
       socket.emit("edit-conflict", {
         taskId,
-        currentEditor: activeEditors[taskId],
+        currentEditor: editor.userId,
       });
     } else {
-      activeEditors[taskId] = socket.userId;
+      activeEditors[taskId] = {
+        userId: socket.userId,
+        timestamp: Date.now(),
+      };
       console.log(`Task ${taskId} locked by ${socket.userId}`);
       socket.broadcast.emit("task-locked", {
         taskId,
@@ -107,9 +104,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("stop-editing", (taskId) => {
-    if (socket.userId && activeEditors[taskId] === socket.userId) {
+    const editor = activeEditors[taskId];
+    if (editor && editor.userId === socket.userId) {
       delete activeEditors[taskId];
-      console.log(`stop-editing from ${socket.userId} on task ${taskId}`);
+      console.log(`Task ${taskId} unlocked by ${socket.userId}`);
       socket.broadcast.emit("task-unlocked", { taskId });
     }
   });

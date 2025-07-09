@@ -307,6 +307,19 @@ function BoardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (editingTask && socket) {
+        socket.emit("stop-editing", editingTask._id);
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [editingTask, socket]);
+
   const updateTask = async (id, updates) => {
     try {
       const res = await axios.put(`${API_BASE}/api/tasks/${id}`, updates, {
@@ -446,6 +459,9 @@ function BoardPage() {
   };
 
   const resetForm = () => {
+    if (editingTask && socket) {
+      socket.emit("stop-editing", editingTask._id);
+    }
     setEditingTask(null);
     setNewTask({
       title: "",
