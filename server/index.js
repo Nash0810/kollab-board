@@ -39,15 +39,35 @@ app.use("/api/activities", activityRoutesFn(io));
 
 const activeEditors = {}; // taskId -> userId
 
+const jwt = require("jsonwebtoken");
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) {
+    console.warn("Socket auth token missing");
+    return next(new Error("Authentication error"));
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.id; // Attach user ID to the socket
+    console.log(`Socket auth passed. User ID: ${socket.userId}`);
+    next();
+  } catch (err) {
+    console.error("Socket auth failed:", err.message);
+    next(new Error("Authentication failed"));
+  }
+});
+
 // 🔌 Socket.IO connection
 io.on("connection", (socket) => {
-  console.log(`🔌 User connected: ${socket.id}`);
+  console.log(`User connected: ${socket.id}`);
 
-  socket.on("join-user", (userId) => {
-    socket.join(`user-${userId}`);
-    socket.userId = userId;
-    console.log(`User ${userId} joined with socket ${socket.id}`);
-  });
+  //  socket.on("join-user", (userId) => {
+  //    socket.join(`user-${userId}`);
+  //    socket.userId = userId;
+  //    console.log(`User ${userId} joined with socket ${socket.id}`);
+  //  });
 
   socket.on("join-task-room", (taskId) => {
     socket.join(taskId);
