@@ -37,32 +37,30 @@ app.use("/api/tasks", taskRoutesFn(io));
 app.use("/api/comments", commentRoutesFn(io));
 app.use("/api/activities", activityRoutesFn(io));
 
-const activeEditors = {};
+const activeEditors = {}; // taskId -> userId
 
-// Socket.IO event handling
+// 🔌 Socket.IO connection
 io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.log(`🔌 User connected: ${socket.id}`);
 
   socket.on("join-user", (userId) => {
-    console.log(`User ${userId} joined with socket ${socket.id}`);
     socket.join(`user-${userId}`);
     socket.userId = userId;
+    console.log(`User ${userId} joined with socket ${socket.id}`);
   });
 
   socket.on("join-task-room", (taskId) => {
-    console.log(`Socket ${socket.id} joined task room ${taskId}`);
     socket.join(taskId);
   });
 
   socket.on("leave-task-room", (taskId) => {
-    console.log(`Socket ${socket.id} left task room ${taskId}`);
     socket.leave(taskId);
   });
 
   socket.on("start-editing", (taskId) => {
     if (!socket.userId) {
       console.warn(
-        "start-editing received without userId on socket:",
+        "Received start-editing before userId set on socket:",
         socket.id
       );
       return;
@@ -72,7 +70,7 @@ io.on("connection", (socket) => {
 
     if (activeEditors[taskId] && activeEditors[taskId] !== socket.userId) {
       console.log(
-        `Conflict detected! Task ${taskId} already being edited by ${activeEditors[taskId]}`
+        `Conflict! Task ${taskId} already being edited by ${activeEditors[taskId]}`
       );
       socket.emit("edit-conflict", {
         taskId,
@@ -89,11 +87,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("stop-editing", (taskId) => {
-    console.log(`stop-editing from ${socket.userId} on task ${taskId}`);
-    if (activeEditors[taskId] === socket.userId) {
+    if (socket.userId && activeEditors[taskId] === socket.userId) {
       delete activeEditors[taskId];
+      console.log(`stop-editing from ${socket.userId} on task ${taskId}`);
       socket.broadcast.emit("task-unlocked", { taskId });
-      console.log(`Task ${taskId} unlocked`);
     }
   });
 
@@ -103,7 +100,6 @@ io.on("connection", (socket) => {
       if (editorId === socket.userId) {
         delete activeEditors[taskId];
         io.emit("task-unlocked", { taskId });
-        console.log(`Task ${taskId} unlocked due to disconnect`);
       }
     }
   });
