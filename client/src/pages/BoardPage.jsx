@@ -214,7 +214,6 @@ function BoardPage() {
         );
 
         console.log("Retry attempt", attempts, "Matched task:", matchedTask);
-
         const hasLocalEdits =
           newTask.title ||
           newTask.description ||
@@ -229,12 +228,11 @@ function BoardPage() {
           setEditingTask(null);
           resetForm();
           showToast("Conflict detected! Resolve below.", "error");
+        } else if (attempts < 10) {
+          attempts++;
+          setTimeout(retryUntilTaskLoaded, 200);
         } else {
-          showToast(
-            "Another user is editing this task. Try again later.",
-            "info"
-          );
-          resetForm();
+          console.warn("Conflict retry failed after multiple attempts.");
         }
       };
 
