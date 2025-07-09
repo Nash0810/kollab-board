@@ -7,6 +7,7 @@ const API_BASE = "https://kollab-board.onrender.com";
 
 function BoardPage() {
   const tasksRef = useRef([]);
+  const [originalTaskSnapshot, setOriginalTaskSnapshot] = useState(null);
 
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
@@ -420,33 +421,31 @@ function BoardPage() {
     e.preventDefault();
     if (!editingTask) return;
 
-    const originalTask = tasks.find((t) => t._id === editingTask._id);
-    if (!originalTask) return;
-
-    socket?.emit("stop-editing", editingTask._id);
-
-    setTasks((prevTasks) =>
-      prevTasks.map((task) =>
-        task._id === editingTask._id ? { ...task, ...newTask } : task
-      )
-    );
-
     try {
+      const res = await axios.get(`${API_BASE}/api/tasks/${editingTask._id}`, {
+        headers: getAuthHeaders(),
+      });
+
+      const serverTask = res.data;
+
+      const originalTime = new Date(originalTaskSnapshot?.updatedAt || 0);
+      const serverTime = new Date(serverTask.updatedAt);
+
+      if (serverTime > originalTime) {
+        // Conflict detected
+        setConflictTask(serverTask);
+        setLocalChanges({ ...newTask });
+        setConflictEditor(serverTask.lastModifiedBy || null);
+        return;
+      }
+
+      // No conflict — safe to update
       await updateTask(editingTask._id, newTask);
-    } catch (err) {
-      console.error("Failed to save edit:", err);
-      setTasks((prevTasks) =>
-        prevTasks.map((task) =>
-          task._id === editingTask._id ? originalTask : task
-        )
-      );
-      setError("Failed to save changes. Please try again.");
-      showToast(
-        err.response?.data?.message || "Failed to save changes.",
-        "error"
-      );
-    } finally {
+      showToast("Task saved!", "success");
       resetForm();
+    } catch (err) {
+      showToast("Failed to save task", "error");
+      console.error(err);
     }
   };
 
@@ -457,6 +456,7 @@ function BoardPage() {
     } else {
       console.warn("Socket not connected, cannot emit start-editing");
     }
+    setOriginalTaskSnapshot(task);
 
     setEditingTask(task);
     setNewTask({
@@ -661,65 +661,42 @@ function BoardPage() {
   const handleResolveConflict = async (resolutionType) => {
     if (!conflictTask || !localChanges) return;
 
-    let mergedData = {};
+    let finalData;
     if (resolutionType === "merge") {
-      mergedData = {
+      finalData = {
+        ...conflictTask,
         title: localChanges.title,
         description: localChanges.description,
         priority: localChanges.priority,
-        status: localChanges.status || conflictTask.status,
-        assignedTo:
-          localChanges.assignedTo || conflictTask.assignedTo.map((u) => u._id),
         dueDate: localChanges.dueDate || conflictTask.dueDate,
+        assignedTo: localChanges.assignedTo || conflictTask.assignedTo,
       };
     } else if (resolutionType === "overwrite") {
-      mergedData = {
-        title: localChanges.title,
-        description: localChanges.description,
-        priority: localChanges.priority,
-        status: localChanges.status,
-        assignedTo: localChanges.assignedTo,
-        dueDate: localChanges.dueDate,
-      };
-    } else if (resolutionType === "discard") {
-      mergedData = {
-        title: conflictTask.title,
-        description: conflictTask.description,
-        priority: conflictTask.priority,
-        status: conflictTask.status,
-        assignedTo: conflictTask.assignedTo.map((u) => u._id),
-        dueDate: conflictTask.dueDate,
-      };
+      finalData = localChanges;
+    } else {
+      finalData = conflictTask;
     }
 
     try {
-      const res = await axios.post(
-        `${API_BASE}/api/tasks/resolve-conflict`,
-        {
-          taskId: conflictTask._id,
-          resolution: resolutionType,
-          mergedData,
-        },
+      const res = await axios.put(
+        `${API_BASE}/api/tasks/${conflictTask._id}`,
+        finalData,
         {
           headers: getAuthHeaders(),
         }
       );
-      console.log("Conflict resolved:", res.data);
-      setTasks((prevTasks) =>
-        prevTasks.map((task) => (task._id === res.data._id ? res.data : task))
-      );
+
+      showToast("Conflict resolved", "success");
       setConflictTask(null);
       setLocalChanges(null);
-      setConflictEditor(null);
-      setError("");
-      showToast("Conflict resolved successfully!", "success");
-    } catch (err) {
-      console.error("Failed to resolve conflict:", err);
-      setError("Failed to resolve conflict. Please try again.");
-      showToast(
-        err.response?.data?.message || "Failed to resolve conflict.",
-        "error"
+      setEditingTask(null);
+      setOriginalTaskSnapshot(null);
+      setTasks((prev) =>
+        prev.map((t) => (t._id === res.data._id ? res.data : t))
       );
+    } catch (err) {
+      console.error("Failed to resolve:", err);
+      showToast("Failed to resolve conflict", "error");
     }
   };
 
@@ -1066,85 +1043,90 @@ function BoardPage() {
 
       {conflictTask && localChanges && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-4xl">
             <h3 className="text-2xl font-bold text-red-600 mb-4">
-              Conflict Detected!
+              Conflict Detected
             </h3>
-            <p className="text-gray-700 mb-4">
-              Another user ({getEditorName(conflictEditor)}) is currently
-              editing task "<b>{conflictTask.title}</b>". Please choose how to
-              resolve your unsaved changes.
+            <p className="text-gray-700 mb-6">
+              The task "<b>{conflictTask.title}</b>" was changed since you
+              started editing. Please choose how to resolve the conflict:
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {/* Server Version */}
+              <div className="bg-gray-50 p-4 rounded-md border">
                 <h4 className="font-semibold text-lg text-gray-800 mb-2">
-                  Current Server Version
+                  Server Version
                 </h4>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Title:</b> {conflictTask.title}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Description:</b> {conflictTask.description}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Priority:</b> {conflictTask.priority}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Status:</b> {conflictTask.status}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Assigned To:</b> {getUserNames(conflictTask.assignedTo)}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Due Date:</b> {getDueDateDisplay(conflictTask.dueDate)}
                 </p>
               </div>
 
-              <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
+              {/* Your Local Changes */}
+              <div className="bg-blue-50 p-4 rounded-md border border-blue-300">
                 <h4 className="font-semibold text-lg text-blue-800 mb-2">
-                  Your Local Changes
+                  Your Changes
                 </h4>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Title:</b> {localChanges.title}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Description:</b> {localChanges.description}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Priority:</b> {localChanges.priority}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Status:</b> {localChanges.status || conflictTask.status}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Assigned To:</b> {getUserNames(localChanges.assignedTo)}
                 </p>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm">
                   <b>Due Date:</b> {getDueDateDisplay(localChanges.dueDate)}
                 </p>
               </div>
-            </div>
 
-            <div className="flex flex-col sm:flex-row justify-end gap-3">
-              <button
-                onClick={() => handleResolveConflict("merge")}
-                className="px-5 py-2 bg-purple-600 text-white rounded-md shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75 transition-colors duration-200"
-              >
-                Merge (Keep your changes, but respect server's status/assignee)
-              </button>
-              <button
-                onClick={() => handleResolveConflict("overwrite")}
-                className="px-5 py-2 bg-yellow-600 text-white rounded-md shadow-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-75 transition-colors duration-200"
-              >
-                Overwrite (Your changes win)
-              </button>
-              <button
-                onClick={() => handleResolveConflict("discard")}
-                className="px-5 py-2 bg-gray-500 text-white rounded-md shadow-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75 transition-colors duration-200"
-              >
-                Discard (Use server's version)
-              </button>
+              {/* Action Panel */}
+              <div className="bg-white p-4 rounded-md border flex flex-col justify-between gap-4">
+                <h4 className="font-semibold text-lg text-gray-700">
+                  Resolution Options
+                </h4>
+                <button
+                  onClick={() => handleResolveConflict("merge")}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+                >
+                  Merge (combine fields)
+                </button>
+                <button
+                  onClick={() => handleResolveConflict("overwrite")}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                >
+                  Overwrite (keep your version)
+                </button>
+                <button
+                  onClick={() => handleResolveConflict("discard")}
+                  className="px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500"
+                >
+                  Discard (use server version)
+                </button>
+              </div>
             </div>
           </div>
         </div>
