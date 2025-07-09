@@ -205,32 +205,23 @@ function BoardPage() {
 
     socketInstance.on("edit-conflict", ({ taskId, currentEditor }) => {
       console.log("Socket: edit-conflict received", taskId, currentEditor);
-      console.log("newTask (form state):", newTask);
 
-      let attempts = 0;
+      const matchedTask = tasks.find((t) => t._id === taskId);
+      if (!matchedTask) {
+        console.warn("Conflict task not found in current task list.");
+        return;
+      }
 
-      const retryUntilTaskLoaded = () => {
-        const matchedTask = tasksRef.current.find(
-          (t) => String(t._id) === String(taskId)
-        );
+      setConflictTask(matchedTask);
+      setConflictEditor(currentEditor);
+      showToast(
+        `Task "${matchedTask.title}" is being edited by ${getEditorName(
+          currentEditor
+        )}.`,
+        "warning"
+      );
 
-        console.log("Retry attempt", attempts, "Matched task:", matchedTask);
-        if (matchedTask) {
-          setConflictTask(matchedTask);
-          setLocalChanges({ ...newTask });
-          setConflictEditor(currentEditor);
-          setEditingTask(null);
-          resetForm();
-          showToast("Conflict detected! Resolve below.", "error");
-        } else if (attempts < 10) {
-          attempts++;
-          setTimeout(retryUntilTaskLoaded, 200);
-        } else {
-          console.warn("Conflict retry failed after multiple attempts.");
-        }
-      };
-
-      retryUntilTaskLoaded();
+      setEditingTask(null);
     });
 
     socketInstance.on("disconnect", () => {
@@ -421,31 +412,39 @@ function BoardPage() {
     e.preventDefault();
     if (!editingTask) return;
 
+    if (conflictTask && conflictTask._id === editingTask._id) {
+      setLocalChanges({ ...newTask });
+      showToast("Conflict detected. Please resolve before saving.", "error");
+      return;
+    }
+
+    const originalTask = tasks.find((t) => t._id === editingTask._id);
+    if (!originalTask) return;
+
+    socket?.emit("stop-editing", editingTask._id);
+
+    setTasks((prevTasks) =>
+      prevTasks.map((task) =>
+        task._id === editingTask._id ? { ...task, ...newTask } : task
+      )
+    );
+
     try {
-      const res = await axios.get(`${API_BASE}/api/tasks/${editingTask._id}`, {
-        headers: getAuthHeaders(),
-      });
-
-      const serverTask = res.data;
-
-      const originalTime = new Date(originalTaskSnapshot?.updatedAt || 0);
-      const serverTime = new Date(serverTask.updatedAt);
-
-      if (serverTime > originalTime) {
-        // Conflict detected
-        setConflictTask(serverTask);
-        setLocalChanges({ ...newTask });
-        setConflictEditor(serverTask.lastModifiedBy || null);
-        return;
-      }
-
-      // No conflict — safe to update
       await updateTask(editingTask._id, newTask);
-      showToast("Task saved!", "success");
-      resetForm();
     } catch (err) {
-      showToast("Failed to save task", "error");
-      console.error(err);
+      console.error("Failed to save edit:", err);
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task._id === editingTask._id ? originalTask : task
+        )
+      );
+      setError("Failed to save changes. Please try again.");
+      showToast(
+        err.response?.data?.message || "Failed to save changes.",
+        "error"
+      );
+    } finally {
+      resetForm();
     }
   };
 

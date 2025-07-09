@@ -173,7 +173,7 @@ kollab-board/
 
 ## 🎥 Demo Video
 
-[Watch on YouTube (Unlisted)](https://youtube.com/demo-link)
+[Watch Demo](https://drive.google.com/file/d/10F8Jyo4r0_BkuTJ009vcjzzFzXn-C2Ae/view?usp=sharing)
 
 Covers:
 

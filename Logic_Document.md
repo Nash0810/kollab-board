@@ -1,87 +1,59 @@
-## 📌 Smart Assign Logic
+### Smart Assign Implementation
 
-**Goal:**
-Automatically assign a task to the user with the fewest number of currently active tasks (status: _Todo_ or _In Progress_).
+The Smart Assign feature automatically assigns tasks to the user with the fewest active tasks, promoting balanced workload distribution across team members.
 
-### 🔧 How It Works:
+**Algorithm Logic:**
 
-1. When a user clicks the **Smart Assign** button:
+1. **Active Task Calculation**: When Smart Assign is triggered, the system queries all tasks in the database and counts active tasks for each user. Active tasks are defined as tasks with status "Todo" or "In Progress" - completed tasks ("Done") are excluded from the count.
 
-   - A request is sent to the backend: `POST /api/tasks/:id/smart-assign`.
+2. **User Selection Process**: The algorithm iterates through all registered users and calculates their current workload. It maintains a running comparison to find the user with the minimum active task count.
 
-2. The backend:
+3. **Tie-Breaking**: If multiple users have the same lowest count, the system selects the first user encountered in the iteration (alphabetically by user ID) to ensure consistent behavior.
 
-   - Fetches **all users**.
-   - For each user, it **counts** how many active tasks they have using:
+4. **Assignment Execution**: Once the optimal user is identified, the task's `assignedTo` field is updated, and the change is broadcast to all connected users via WebSocket for real-time synchronization.
 
-     ```js
-     Task.countDocuments({
-       assignedTo: user._id,
-       status: { $in: ["Todo", "In Progress"] },
-     });
-     ```
+**Business Benefits:**
 
-3. After calculating task counts, the user with the **lowest active task count** is selected.
+- Prevents task overload on individual team members
+- Ensures fair distribution of workload
+- Improves team productivity by automatically balancing assignments
+- Reduces manual effort in task assignment decisions
 
-4. The task is **updated** to assign it to this user.
+### Conflict Handling Implementation
 
-5. The assignment is **broadcast in real-time** via Socket.IO to all connected clients.
+The conflict resolution system detects and manages simultaneous edits to the same task by multiple users, ensuring data integrity and providing user-friendly resolution options.
 
-6. An **activity log entry** is created and stored, including:
+**Conflict Detection Process:**
 
-   - The task title
-   - The assigned user
-   - Reason for smart assignment
+1. **Edit Tracking**: When a user begins editing a task, the system captures a timestamp of when editing started. This timestamp is stored locally and sent with update requests.
 
-### 💡 Example:
+2. **Server-Side Validation**: Upon receiving a task update request, the backend compares the task's last modified timestamp in the database with the editing start time provided by the client. If the database timestamp is newer, it indicates another user has modified the task since editing began.
 
-- User A: 2 active tasks
-- User B: 1 active task
-- Result: Task gets assigned to **User B**
+3. **Conflict Response**: When a conflict is detected, the server responds with HTTP status 409 (Conflict) along with both the current server version and the attempted client changes, rather than silently overwriting data.
 
----
+**Resolution Options:**
 
-## 🚨 Conflict Handling Logic
+1. **Merge Strategy**: Combines both versions by taking non-empty fields from the user's changes and falling back to server values for unchanged fields. This preserves work from both users when possible.
 
-**Goal:**
-Prevent silent overwrites when multiple users try to edit the same task simultaneously.
+2. **Overwrite Strategy**: Keeps the user's complete version, discarding server changes. Used when the user is confident their changes should take precedence.
 
-### 🛠 How It Works:
+3. **Discard Strategy**: Abandons the user's changes and adopts the server version. Used when the user determines the other user's changes are more appropriate.
 
-1. **When a user starts editing a task:**
+**User Experience Flow:**
 
-   - A Socket.IO event `start-editing` is emitted to the server with the task ID.
-   - The server checks if anyone else is editing that task (`activeEditors` map).
+1. User A and User B both open the same task for editing
+2. User A saves changes first - update succeeds normally
+3. User B attempts to save - conflict detected
+4. User B sees a modal showing three columns: original version, their changes, and current server version
+5. User B selects resolution strategy and confirms
+6. Final resolved version is saved and broadcast to all users
+7. Conflict resolution action is logged in the activity feed
 
-2. If **another user is already editing**, a `edit-conflict` event is emitted back to the second user.
+**Technical Implementation:**
 
-3. The second user receives a UI **conflict modal**, offering 3 options:
+- Frontend stores local changes in component state during editing
+- Backend uses MongoDB's `updatedAt` field for conflict detection
+- WebSocket events notify all users of conflict resolution completion
+- Activity logging tracks conflict occurrences and resolution choices for audit purposes
 
-   - **Merge:** Combines both local and server changes.
-   - **Overwrite:** Pushes local changes over server version.
-   - **Discard:** Keeps the server version and cancels local changes.
-
-4. Upon decision:
-
-   - A request is sent to `POST /api/tasks/resolve-conflict` with:
-
-     - `taskId`
-     - `resolution` type
-     - `mergedData` (new task state)
-
-5. The backend:
-
-   - Applies the chosen resolution (`merge`, `overwrite`, or discard).
-   - Updates the task in the database.
-   - Emits `task-updated` via Socket.IO.
-   - Logs the resolution action in the **activity log**.
-
-### 🧠 Example:
-
-- User A and User B both open Task X.
-- User A updates the description.
-- User B tries to edit the same task → **Conflict Detected**
-- User B chooses **merge** and sends merged content.
-- Server updates task and notifies all clients.
-
----
+This approach ensures no data is lost unintentionally while maintaining collaborative workflow efficiency.
