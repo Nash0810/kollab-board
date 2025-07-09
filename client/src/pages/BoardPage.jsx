@@ -6,6 +6,8 @@ import { io } from "socket.io-client";
 const API_BASE = "https://kollab-board.onrender.com";
 
 function BoardPage() {
+  const tasksRef = useRef([]);
+
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [activities, setActivities] = useState([]);
@@ -207,9 +209,11 @@ function BoardPage() {
       let attempts = 0;
 
       const retryUntilTaskLoaded = () => {
-        const matchedTask = tasks.find((t) => String(t._id) === String(taskId));
+        const matchedTask = tasksRef.current.find(
+          (t) => String(t._id) === String(taskId)
+        );
 
-        console.log("🔁 Retry attempt", attempts, "Matched task:", matchedTask);
+        console.log("Retry attempt", attempts, "Matched task:", matchedTask);
 
         if (matchedTask && newTask?.title) {
           setConflictTask(matchedTask);
@@ -334,6 +338,10 @@ function BoardPage() {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, [editingTask, socket]);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
 
   const updateTask = async (id, updates) => {
     try {
