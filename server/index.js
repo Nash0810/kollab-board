@@ -38,7 +38,7 @@ app.use("/api/comments", commentRoutesFn(io));
 app.use("/api/activities", activityRoutesFn(io));
 
 const activeEditors = {
-  [taskId]: { userId: "...", timestamp: Date },
+  // [taskId]: { userId: "...", timestamp: Date },
 }; // taskId -> userId
 
 const jwt = require("jsonwebtoken");
