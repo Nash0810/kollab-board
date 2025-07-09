@@ -231,7 +231,7 @@ function BoardPage() {
       }
       socketInstance.disconnect();
     };
-  }, [navigate, currentUser.id, editingTask, newTask, tasks, showToast]);
+  }, [navigate, currentUser.id]);
 
   useEffect(() => {
     const loadAll = async () => {
