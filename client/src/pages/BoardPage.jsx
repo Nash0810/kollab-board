@@ -207,20 +207,31 @@ function BoardPage() {
       console.log("Matched task:", task);
       console.log("newTask (form state):", newTask);
 
-      // Safety check: if task is not yet in state, wait and retry
+      // Immediate check
       if (!task || !newTask.title) {
         console.warn(
           "Task or newTask not ready — retrying conflict handling..."
         );
 
-        // Retry after delay
         setTimeout(() => {
           const retryTask = tasks.find((t) => t._id === taskId);
-          setConflictTask(retryTask || null);
-          setLocalChanges({ ...newTask });
+          console.log("Retry Matched task:", retryTask);
+
+          if (retryTask) {
+            setConflictTask(retryTask);
+          } else {
+            console.error("Retry failed: still no task matched for conflict");
+          }
+
+          if (newTask.title) {
+            setLocalChanges({ ...newTask });
+          } else {
+            console.warn("Retry failed: newTask is still empty");
+          }
+
           setConflictEditor(currentEditor);
           resetForm();
-        }, 200); // wait 200ms to let setState flush
+        }, 200);
         return;
       }
 
