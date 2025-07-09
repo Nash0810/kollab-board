@@ -215,18 +215,26 @@ function BoardPage() {
 
         console.log("Retry attempt", attempts, "Matched task:", matchedTask);
 
-        if (matchedTask) {
+        const hasLocalEdits =
+          newTask.title ||
+          newTask.description ||
+          newTask.dueDate ||
+          newTask.priority !== "Medium" ||
+          newTask.assignedTo.length > 0;
+
+        if (matchedTask && hasLocalEdits) {
           setConflictTask(matchedTask);
           setLocalChanges({ ...newTask });
           setConflictEditor(currentEditor);
           setEditingTask(null);
           resetForm();
           showToast("Conflict detected! Resolve below.", "error");
-        } else if (attempts < 10) {
-          attempts++;
-          setTimeout(retryUntilTaskLoaded, 200);
         } else {
-          console.warn("Conflict retry failed after multiple attempts.");
+          showToast(
+            "Another user is editing this task. Try again later.",
+            "info"
+          );
+          resetForm();
         }
       };
 
