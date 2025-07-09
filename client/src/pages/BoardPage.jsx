@@ -203,15 +203,16 @@ function BoardPage() {
     socketInstance.on("edit-conflict", ({ taskId, currentEditor }) => {
       console.log("Socket: edit-conflict received", taskId, currentEditor);
 
-      if (editingTask && editingTask._id === taskId) {
-        setConflictTask(tasks.find((t) => t._id === taskId));
-        setLocalChanges(newTask);
-        setConflictEditor(currentEditor);
-        setEditingTask(null);
-        resetForm();
-        setError("Conflict detected! Another user is editing this task.");
-        showToast("Conflict detected! Please resolve.", "error");
-      }
+      const task = tasks.find((t) => t._id === taskId);
+      if (!task) return;
+
+      setConflictTask(task);
+      setLocalChanges(newTask);
+      setConflictEditor(currentEditor);
+      setEditingTask(null);
+      resetForm();
+      setError("Conflict detected! Another user is editing this task.");
+      showToast("Conflict detected! Please resolve.", "error");
     });
 
     socketInstance.on("disconnect", () => {
